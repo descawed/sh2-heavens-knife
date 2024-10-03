@@ -1,0 +1,20 @@
+[package]
+name = "sh2hvnknf"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+strip = true
+lto = true
+panic = "abort"
+
+[dependencies]
+anyhow = "1.0.89"
+iced-x86 = { version = "1.21.0", features = ["code_asm"] }
+log = "0.4.22"
+memchr = "2.7.4"
+simplelog = "0.12.2"
+windows = { version = "0.58.0", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_SystemServices", "Win32_System_Threading"] }
