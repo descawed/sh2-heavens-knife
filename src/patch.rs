@@ -58,12 +58,12 @@ impl ByteSearcher {
     pub fn find_bytes_in_ranges<'a, const N: usize>(patterns: &[&[u8]; N], protection: Option<PAGE_PROTECTION_FLAGS>, ranges: impl Iterator<Item = &'a (*const c_void, *const c_void)>) -> Result<[Option<*const c_void>; N]> {
         let mut addresses = [None; N];
         for &(start, end) in ranges {
-            if addresses.iter().all(Option::is_some) {
-                break; // no need to keep searching
-            }
-
             let mut addr = start;
             while addr < end {
+                if addresses.iter().all(Option::is_some) {
+                    break; // no need to keep searching
+                }
+
                 let mut memory_info = MEMORY_BASIC_INFORMATION::default();
                 log::debug!("Querying address {:#08X}", addr as usize);
                 let result = unsafe { VirtualQuery(Some(addr), &mut memory_info, size_of_val(&memory_info)) };
