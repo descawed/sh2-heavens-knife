@@ -14,9 +14,11 @@ mod game;
 mod patch;
 
 const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex";
-const MARIA_ICON_DRAW_CALL: [u8; 7] = [0x50, 0x0F, 0xB6, 0x46, 0xF0, 0x50, 0xE8];
-const ICON_DRAW_LOOP: [u8; 16] = [
+const JAMES_ICON_DRAW_LOOP: [u8; 16] = [
     0x66, 0x8B, 0x50, 0x04, 0x66, 0x2B, 0x10, 0x83, 0xC0, 0x3C, 0x66, 0x89, 0x51, 0xFE, 0x66, 0x8B,
+];
+const MARIA_ICON_DRAW_LOOP: [u8; 16] = [
+    0x66, 0x8B, 0x50, 0x04, 0x66, 0x2B, 0x10, 0x83, 0xC0, 0x24, 0x66, 0x89, 0x51, 0xFE, 0x66, 0x8B,
 ];
 const MARIA_WEAPON_ASSERT: [u8; 8] = [0xFF, 0x75, 0x1B, 0x68, 0x17, 0x03, 0x00, 0x00];
 const CHECK_JAMES_WEAPON_LIST: [u8; 7] = [
@@ -86,27 +88,27 @@ fn main(reason: u32) -> Result<()> {
     // Maria vs James texture check
     let mut tex_ref_data: [u8; 7] = [0x50, 0x68, 0, 0, 0, 0, 0xE8];
     tex_ref_data[2..6].copy_from_slice(&(menu_address as usize).to_le_bytes());
-    let (tex_ref_call_address, icon_draw_call_address, icon_draw_loop_address, weapon_assert_address) = match searcher
+    let (tex_ref_call_address, james_icon_draw_loop_address, maria_icon_draw_loop_address, weapon_assert_address) = match searcher
         .find_bytes(
-            &[&tex_ref_data, &MARIA_ICON_DRAW_CALL, &ICON_DRAW_LOOP, &MARIA_WEAPON_ASSERT],
+            &[&tex_ref_data, &JAMES_ICON_DRAW_LOOP, &MARIA_ICON_DRAW_LOOP, &MARIA_WEAPON_ASSERT],
             Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
             sh2pc,
         )? {
-        [Some(tex_ref_call_address), Some(icon_draw_call_address), Some(icon_draw_loop_address), Some(weapon_assert_address)] => {
+        [Some(tex_ref_call_address), Some(james_icon_draw_loop_address), Some(maria_icon_draw_loop_address), Some(weapon_assert_address)] => {
             (
                 tex_ref_call_address,
-                icon_draw_call_address,
-                icon_draw_loop_address,
+                james_icon_draw_loop_address,
+                maria_icon_draw_loop_address,
                 weapon_assert_address,
             )
         }
         _ => return Err(anyhow!("Failed to find code addresses")),
     };
     log::debug!(
-        "Found tex ref data at {:#08X}, icon draw call at {:#08X}, icon draw loop at {:#08X}, weapon assert at {:#08X}",
+        "Found tex ref data at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}",
         tex_ref_call_address as usize,
-        icon_draw_call_address as usize,
-        icon_draw_loop_address as usize,
+        james_icon_draw_loop_address as usize,
+        maria_icon_draw_loop_address as usize,
         weapon_assert_address as usize,
     );
 
@@ -115,31 +117,34 @@ fn main(reason: u32) -> Result<()> {
         let tex_ref_check_address = tex_ref_call_address.offset(-27);
         patch::assert_byte(tex_ref_check_address, 0x75)?; // jnz
 
-        let icon_check_address = icon_draw_call_address.offset(-7);
-        patch::assert_byte(icon_check_address, 0x75)?; // jnz
+        let maria_icon_func_address = maria_icon_draw_loop_address.offset(-16);
+        patch::assert_byte(maria_icon_func_address, 0x83)?; // sub
 
-        let coords_load_address = icon_draw_loop_address.offset(-8);
+        let james_icon_func_address = james_icon_draw_loop_address.offset(-16);
+        patch::assert_byte(james_icon_func_address, 0x83)?; // sub
+
+        let coords_load_address = james_icon_draw_loop_address.offset(-8);
         patch::assert_byte(coords_load_address, 0xB8)?; // mov
 
-        let coords_end_load_address = icon_draw_loop_address.offset(121);
+        let coords_end_load_address = james_icon_draw_loop_address.offset(121);
         patch::assert_byte(coords_end_load_address, 0x3D)?; // cmp
 
-        let id_check_address = icon_draw_loop_address.offset(146);
+        let id_check_address = james_icon_draw_loop_address.offset(146);
         patch::assert_byte(id_check_address, 0x39)?; // cmp
 
-        let item_num_address = icon_draw_loop_address.offset(156);
+        let item_num_address = james_icon_draw_loop_address.offset(156);
         patch::assert_byte(item_num_address, 0x83)?; // cmp
 
-        let float_address1 = icon_draw_loop_address.offset(203);
+        let float_address1 = james_icon_draw_loop_address.offset(203);
         patch::assert_byte(float_address1, 0xD8)?; // fmul
 
-        let float_address2 = icon_draw_loop_address.offset(229);
+        let float_address2 = james_icon_draw_loop_address.offset(229);
         patch::assert_byte(float_address2, 0xD8)?; // fmul
 
-        let coords_index_address1 = icon_draw_loop_address.offset(292);
+        let coords_index_address1 = james_icon_draw_loop_address.offset(292);
         patch::assert_byte(coords_index_address1, 0x0F)?; // movsx
 
-        let coords_index_address2 = icon_draw_loop_address.offset(299);
+        let coords_index_address2 = james_icon_draw_loop_address.offset(299);
         patch::assert_byte(coords_index_address2, 0x0F)?; // movsx
 
         // we don't patch this check so we can handle Maria's no-weapon animation
@@ -192,9 +197,12 @@ fn main(reason: u32) -> Result<()> {
         // always use main scenario icon dimensions
         log::info!(
             "Applying icon draw patch at address {:#08X}",
-            icon_check_address as usize
+            maria_icon_func_address as usize,
         );
-        patch::patch(icon_check_address, &[0xEB])?;
+        let rel = james_icon_func_address.offset_from(maria_icon_func_address.offset(5)); // +5 for the instruction length
+        let mut icon_func_jmp: [u8; 5] = [0xE9, 0, 0, 0, 0];
+        icon_func_jmp[1..5].copy_from_slice(&rel.to_le_bytes());
+        patch::patch(maria_icon_func_address, &icon_func_jmp)?;
 
         // use our expanded icon coordinate array
         log::info!(
