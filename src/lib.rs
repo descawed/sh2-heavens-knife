@@ -30,6 +30,8 @@ const CHECK_JAMES_WEAPON_LIST2: [u8; 7] = [
     0x31, 0xD2, // xor edx, edx
     0xE9, 0x75, 0x00, 0x00, 0x00, // jmp +117 bytes
 ];
+const JAMES_ANIMATION_SIZE1: [u8; 6] = [0x81, 0xC5, 0x00, 0x40, 0x08, 0x00];
+const JAMES_ANIMATION_SIZE2: [u8; 6] = [0x81, 0xC1, 0x00, 0x40, 0x08, 0x00];
 
 fn open_log() -> Result<()> {
     let log_file = File::create("sh2hvnknf.log")?;
@@ -93,30 +95,49 @@ fn main(reason: u32) -> Result<()> {
     // Maria vs James texture check
     let mut tex_ref_data: [u8; 7] = [0x50, 0x68, 0, 0, 0, 0, 0xE8];
     tex_ref_data[2..6].copy_from_slice(&(menu_address as usize).to_le_bytes());
-    let (tex_ref_call_address, james_icon_draw_loop_address, maria_icon_draw_loop_address, weapon_assert_address, weapon_assert_address2) = match searcher
-        .find_bytes(
-            &[&tex_ref_data, &JAMES_ICON_DRAW_LOOP, &MARIA_ICON_DRAW_LOOP, &MARIA_WEAPON_ASSERT, &MARIA_WEAPON_ASSERT2],
-            Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
-            sh2pc,
-        )? {
-        [Some(tex_ref_call_address), Some(james_icon_draw_loop_address), Some(maria_icon_draw_loop_address), Some(weapon_assert_address), Some(weapon_assert_address2)] => {
+    let (
+        tex_ref_call_address,
+        james_icon_draw_loop_address,
+        maria_icon_draw_loop_address,
+        weapon_assert_address,
+        weapon_assert_address2,
+        james_anim_address1,
+        james_anim_address2,
+    ) = match searcher.find_bytes(
+        &[
+            &tex_ref_data,
+            &JAMES_ICON_DRAW_LOOP,
+            &MARIA_ICON_DRAW_LOOP,
+            &MARIA_WEAPON_ASSERT,
+            &MARIA_WEAPON_ASSERT2,
+            &JAMES_ANIMATION_SIZE1,
+            &JAMES_ANIMATION_SIZE2,
+        ],
+        Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
+        sh2pc,
+    )? {
+        [Some(tex_ref_call_address), Some(james_icon_draw_loop_address), Some(maria_icon_draw_loop_address), Some(weapon_assert_address), Some(weapon_assert_address2), Some(james_anim_address1), Some(james_anim_address2)] => {
             (
                 tex_ref_call_address,
                 james_icon_draw_loop_address,
                 maria_icon_draw_loop_address,
                 weapon_assert_address,
                 weapon_assert_address2,
+                james_anim_address1,
+                james_anim_address2,
             )
         }
         _ => return Err(anyhow!("Failed to find code addresses")),
     };
     log::debug!(
-        "Found tex ref data at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}",
+        "Found tex ref data at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, James anim1 at {:#08X}, James anim2 at {:#08X}",
         tex_ref_call_address as usize,
         james_icon_draw_loop_address as usize,
         maria_icon_draw_loop_address as usize,
         weapon_assert_address as usize,
         weapon_assert_address2 as usize,
+        james_anim_address1 as usize,
+        james_anim_address2 as usize,
     );
 
     unsafe {
@@ -171,7 +192,13 @@ fn main(reason: u32) -> Result<()> {
         let weapon_data_ptr_address = weapon_assert_address.offset(169);
         patch::assert_byte(weapon_data_ptr_address, 0xA1)?;
 
-        let weapon_data_address = usize::from_le_bytes(std::slice::from_raw_parts(weapon_data_ptr_address.offset(1) as *const u8, size_of::<usize>()).try_into()?) as *mut u8;
+        let weapon_data_address = usize::from_le_bytes(
+            std::slice::from_raw_parts(
+                weapon_data_ptr_address.offset(1) as *const u8,
+                size_of::<usize>(),
+            )
+            .try_into()?,
+        ) as *mut u8;
         patch::assert_byte(weapon_data_address, 0)?;
 
         let james_weapon_end_address = weapon_data_address.offset(180);
@@ -259,12 +286,21 @@ fn main(reason: u32) -> Result<()> {
             &(game::NUM_ITEMS as u8).to_le_bytes(),
         )?;
 
+        // increase memory for James' weapon animations
+        log::info!("Applying James animation patch at addresses {:#08X}, {:#08X}", james_anim_address1 as usize, james_anim_address2 as usize);
+        let size_bytes = game::MARIA_ANIMATION_SIZE.to_le_bytes();
+        patch::patch(james_anim_address1.offset(2), &size_bytes)?;
+        patch::patch(james_anim_address2.offset(2), &size_bytes)?;
+
         // merge James and Maria's weapon lists into a single contiguous list
         log::info!("Merging weapon lists");
 
-        let james_weapon_end = std::slice::from_raw_parts_mut(james_weapon_end_address, game::WEAPON_INFO_SIZE);
-        let maria_weapon_end = std::slice::from_raw_parts(maria_weapon_end_address, game::WEAPON_INFO_SIZE);
-        let maria_weapon_cleaver = std::slice::from_raw_parts_mut(maria_weapon_cleaver_address, game::WEAPON_INFO_SIZE);
+        let james_weapon_end =
+            std::slice::from_raw_parts_mut(james_weapon_end_address, game::WEAPON_INFO_SIZE);
+        let maria_weapon_end =
+            std::slice::from_raw_parts(maria_weapon_end_address, game::WEAPON_INFO_SIZE);
+        let maria_weapon_cleaver =
+            std::slice::from_raw_parts_mut(maria_weapon_cleaver_address, game::WEAPON_INFO_SIZE);
 
         james_weapon_end.copy_from_slice(maria_weapon_cleaver); // replace James' end marker with the cleaver
         maria_weapon_cleaver.copy_from_slice(maria_weapon_end); // replace the cleaver with the end marker
@@ -273,7 +309,12 @@ fn main(reason: u32) -> Result<()> {
         // so she gets the proper animation for no weapon
 
         // now we patch the logic
-        log::info!("Patching weapon selection logic at addresses {:#08X}, {:#08X}, {:#08X}", maria_weapon_assert_address as usize, weapon_player_check_address2 as usize, maria_weapon_assert_address2 as usize);
+        log::info!(
+            "Patching weapon selection logic at addresses {:#08X}, {:#08X}, {:#08X}",
+            maria_weapon_assert_address as usize,
+            weapon_player_check_address2 as usize,
+            maria_weapon_assert_address2 as usize
+        );
         patch::patch(maria_weapon_assert_address, &CHECK_JAMES_WEAPON_LIST)?;
         patch::patch(weapon_player_check_address2, &[0x90, 0x90])?; // nop out jump to always use James path
         patch::patch(maria_weapon_assert_address2, &CHECK_JAMES_WEAPON_LIST2)?;
