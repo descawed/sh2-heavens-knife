@@ -1,8 +1,9 @@
+#![allow(static_mut_refs)]
+
 use std::ffi::c_void;
 use std::fs::File;
 use std::panic;
-
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use simplelog::{Config, LevelFilter, WriteLogger};
 use windows::Win32::Foundation::{BOOL, HMODULE};
 use windows::Win32::System::Memory::{
@@ -32,6 +33,54 @@ const CHECK_JAMES_WEAPON_LIST2: [u8; 7] = [
 ];
 const JAMES_ANIMATION_SIZE1: [u8; 6] = [0x81, 0xC5, 0x00, 0x40, 0x08, 0x00];
 const JAMES_ANIMATION_SIZE2: [u8; 6] = [0x81, 0xC1, 0x00, 0x40, 0x08, 0x00];
+const ANIMATION_OFFSET_FUNC: [u8; 16] = [
+    0x0F, 0xB7, 0x44, 0x24, 0x04, 0x3D, 0x09, 0x02, 0x00, 0x00, 0x0F, 0x8F, 0xBC, 0x00, 0x00, 0x00
+];
+
+#[derive(Debug)]
+struct PersistentData {
+    pub equipped_item_id: *mut u8,
+    pub james_anim_offset_thunk: [u8; 16],
+    pub maria_anim_offset_thunk: [u8; 16],
+}
+
+impl PersistentData {
+    const fn new() -> Self {
+        Self {
+            equipped_item_id: std::ptr::null_mut(),
+            james_anim_offset_thunk: [
+                0x53, // push ebx
+                0x51, // push ecx
+                0x52, // push edx
+                0x56, // push esi
+                0x57, // push edi
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x5F, // pop edi
+                0x5E, // pop esi
+                0x5A, // pop edx
+                0x59, // pop ecx
+                0x5B, // pop ebx
+                0xC3, // retn
+            ],
+            maria_anim_offset_thunk: [
+                0x53, // push ebx
+                0x51, // push ecx
+                0x52, // push edx
+                0x56, // push esi
+                0x57, // push edi
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x5F, // pop edi
+                0x5E, // pop esi
+                0x5A, // pop edx
+                0x59, // pop ecx
+                0x5B, // pop ebx
+                0xC3, // retn
+            ],
+        }
+    }
+}
+
+static mut GLOBAL: PersistentData = PersistentData::new();
 
 fn open_log() -> Result<()> {
     let log_file = File::create("sh2hvnknf.log")?;
@@ -45,6 +94,25 @@ fn open_log() -> Result<()> {
     }));
 
     Ok(())
+}
+
+const fn get_animation_offset(equipped_item_id: u8, is_james: bool) -> usize {
+    // FIXME: this might actually break Maria in the main scenario. need to reference the variable
+    //  for the actual player character
+    // 10 = Colt, 17 = Cleaver, 0 = none
+    if equipped_item_id == 10 || equipped_item_id == 17 || (equipped_item_id == 0 && !is_james) {
+        game::MARIA_ANIMATION_OFFSET
+    } else {
+        game::JAMES_ANIMATION_OFFSET
+    }
+}
+
+unsafe extern "C" fn get_james_animation_offset() -> usize {
+    get_animation_offset(*GLOBAL.equipped_item_id, true)
+}
+
+unsafe extern "C" fn get_maria_animation_offset() -> usize {
+    get_animation_offset(*GLOBAL.equipped_item_id, false)
 }
 
 fn main(reason: u32) -> Result<()> {
@@ -62,9 +130,8 @@ fn main(reason: u32) -> Result<()> {
 
     let sh2pc = &["sh2pc.exe"];
 
-    let tex_address = match searcher.find_bytes(&[ICON_TEX_NAME], Some(PAGE_READONLY), sh2pc)? {
-        [Some(tex_address)] => tex_address,
-        _ => return Err(anyhow!("Failed to find item icon texture name")),
+    let [Some(tex_address)] = searcher.find_bytes(&[ICON_TEX_NAME], Some(PAGE_READONLY), sh2pc)? else {
+        bail!("Failed to find item icon texture name");
     };
     log::debug!(
         "Found item menu texture path at {:#08X}",
@@ -78,13 +145,12 @@ fn main(reason: u32) -> Result<()> {
     let icon_coords_ptr = game::ICON_COORDS.as_ptr() as *const u8;
     let icon_coords_buf = unsafe { std::slice::from_raw_parts(icon_coords_ptr, 12) };
 
-    let (menu_address, icon_coord_address) = match searcher.find_bytes(
+    let [Some(menu_address), Some(icon_coord_address)] = searcher.find_bytes(
         &[&menu_data, icon_coords_buf],
         Some(PAGE_READWRITE | PAGE_WRITECOPY),
         sh2pc,
-    )? {
-        [Some(menu_address), Some(icon_coord_address)] => (menu_address, icon_coord_address),
-        _ => return Err(anyhow!("Failed to find .data values")),
+    )? else {
+        bail!("Failed to find .data values");
     };
     log::debug!(
         "Found menu data at {:#08X}, icon coords at {:#08X}",
@@ -95,15 +161,16 @@ fn main(reason: u32) -> Result<()> {
     // Maria vs James texture check
     let mut tex_ref_data: [u8; 7] = [0x50, 0x68, 0, 0, 0, 0, 0xE8];
     tex_ref_data[2..6].copy_from_slice(&(menu_address as usize).to_le_bytes());
-    let (
-        tex_ref_call_address,
-        james_icon_draw_loop_address,
-        maria_icon_draw_loop_address,
-        weapon_assert_address,
-        weapon_assert_address2,
-        james_anim_address1,
-        james_anim_address2,
-    ) = match searcher.find_bytes(
+    let [
+        Some(tex_ref_call_address),
+        Some(james_icon_draw_loop_address),
+        Some(maria_icon_draw_loop_address),
+        Some(weapon_assert_address),
+        Some(weapon_assert_address2),
+        Some(james_anim_address1),
+        Some(james_anim_address2),
+        Some(animation_offset_func),
+    ] = searcher.find_bytes(
         &[
             &tex_ref_data,
             &JAMES_ICON_DRAW_LOOP,
@@ -112,25 +179,15 @@ fn main(reason: u32) -> Result<()> {
             &MARIA_WEAPON_ASSERT2,
             &JAMES_ANIMATION_SIZE1,
             &JAMES_ANIMATION_SIZE2,
+            &ANIMATION_OFFSET_FUNC,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
-    )? {
-        [Some(tex_ref_call_address), Some(james_icon_draw_loop_address), Some(maria_icon_draw_loop_address), Some(weapon_assert_address), Some(weapon_assert_address2), Some(james_anim_address1), Some(james_anim_address2)] => {
-            (
-                tex_ref_call_address,
-                james_icon_draw_loop_address,
-                maria_icon_draw_loop_address,
-                weapon_assert_address,
-                weapon_assert_address2,
-                james_anim_address1,
-                james_anim_address2,
-            )
-        }
-        _ => return Err(anyhow!("Failed to find code addresses")),
+    )? else {
+        bail!("Failed to find code addresses");
     };
     log::debug!(
-        "Found tex ref data at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, James anim1 at {:#08X}, James anim2 at {:#08X}",
+        "Found tex ref data at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}",
         tex_ref_call_address as usize,
         james_icon_draw_loop_address as usize,
         maria_icon_draw_loop_address as usize,
@@ -138,6 +195,7 @@ fn main(reason: u32) -> Result<()> {
         weapon_assert_address2 as usize,
         james_anim_address1 as usize,
         james_anim_address2 as usize,
+        animation_offset_func as usize,
     );
 
     unsafe {
@@ -187,6 +245,20 @@ fn main(reason: u32) -> Result<()> {
 
         let maria_weapon_assert_address2 = weapon_assert_address2.offset(3);
         // no point asserting since this is still within our search string
+
+        // get pointer to equipped item ID
+        let equipped_item_id_address = std::ptr::read_unaligned(weapon_assert_address.offset(-43) as *const *mut u8);
+        // make sure the address looks reasonable
+        if !searcher.find_addresses(&[equipped_item_id_address as usize], Some(PAGE_READWRITE | PAGE_WRITECOPY), sh2pc)?[0] {
+            bail!("Equipped item ID address {:#08X} doesn't look right", equipped_item_id_address as usize);
+        }
+        GLOBAL.equipped_item_id = equipped_item_id_address;
+
+        let james_animation_offset_address = animation_offset_func.offset(0x30);
+        patch::assert_byte(james_animation_offset_address, 0xB8)?; // mov
+
+        let maria_animation_offset_address = animation_offset_func.offset(0x78);
+        patch::assert_byte(maria_animation_offset_address, 0xB8)?; // mov
 
         // prepare to rearrange weapon data entries
         let weapon_data_ptr_address = weapon_assert_address.offset(169);
@@ -318,6 +390,15 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(maria_weapon_assert_address, &CHECK_JAMES_WEAPON_LIST)?;
         patch::patch(weapon_player_check_address2, &[0x90, 0x90])?; // nop out jump to always use James path
         patch::patch(maria_weapon_assert_address2, &CHECK_JAMES_WEAPON_LIST2)?;
+
+        // select correct animation offset based on equipped weapon
+        patch::set_trampoline(&mut GLOBAL.james_anim_offset_thunk, 5, get_james_animation_offset as usize)?;
+        let james_animation_offset_call = patch::call(james_animation_offset_address as usize, &raw const GLOBAL.james_anim_offset_thunk as usize);
+        patch::patch(james_animation_offset_address, &james_animation_offset_call)?;
+
+        patch::set_trampoline(&mut GLOBAL.maria_anim_offset_thunk, 5, get_maria_animation_offset as usize)?;
+        let maria_animation_offset_call = patch::call(maria_animation_offset_address as usize, &raw const GLOBAL.maria_anim_offset_thunk as usize);
+        patch::patch(maria_animation_offset_address, &maria_animation_offset_call)?;
     }
 
     log::info!("All patches applied successfully");

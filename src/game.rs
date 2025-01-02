@@ -4,6 +4,8 @@ pub struct IconCoords(pub u16, pub u16, pub u16); // x, y, edge
 pub const NUM_ITEMS: usize = 90;
 pub const WEAPON_INFO_SIZE: usize = 20;
 pub const MARIA_ANIMATION_SIZE: usize = 579536;
+pub const MARIA_ANIMATION_OFFSET: usize = 464;
+pub const JAMES_ANIMATION_OFFSET: usize = 528;
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),
