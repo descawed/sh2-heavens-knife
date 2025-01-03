@@ -1,11 +1,376 @@
+mod msg;
+pub use msg::*;
+
 #[repr(C)]
+#[derive(Debug)]
 pub struct IconCoords(pub u16, pub u16, pub u16); // x, y, edge
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct D3DXMATRIX {
+    pub _11: f32,
+    pub _12: f32,
+    pub _13: f32,
+    pub _14: f32,
+    pub _21: f32,
+    pub _22: f32,
+    pub _23: f32,
+    pub _24: f32,
+    pub _31: f32,
+    pub _32: f32,
+    pub _33: f32,
+    pub _34: f32,
+    pub _41: f32,
+    pub _42: f32,
+    pub _43: f32,
+    pub _44: f32,
+}
+
+impl D3DXMATRIX {
+    pub const fn new() -> Self {
+        Self {
+            _11: 0.0,
+            _12: 0.0,
+            _13: 0.0,
+            _14: 0.0,
+            _21: 0.0,
+            _22: 0.0,
+            _23: 0.0,
+            _24: 0.0,
+            _31: 0.0,
+            _32: 0.0,
+            _33: 0.0,
+            _34: 0.0,
+            _41: 0.0,
+            _42: 0.0,
+            _43: 0.0,
+            _44: 0.0,
+        }
+    }
+
+    pub const fn identity() -> Self {
+        Self {
+            _11: 1.0,
+            _12: 0.0,
+            _13: 0.0,
+            _14: 0.0,
+            _21: 0.0,
+            _22: 1.0,
+            _23: 0.0,
+            _24: 0.0,
+            _31: 0.0,
+            _32: 0.0,
+            _33: 1.0,
+            _34: 0.0,
+            _41: 0.0,
+            _42: 0.0,
+            _43: 0.0,
+            _44: 1.0,
+        }
+    }
+}
+
+impl Default for D3DXMATRIX {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for D3DXMATRIX {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]\n[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]\n[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]\n[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]",
+            self._11, self._12, self._13, self._14, self._21, self._22, self._23, self._24, self._31,
+            self._32, self._33, self._34, self._41, self._42, self._43, self._44
+        )
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct D3DXVECTOR4 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+impl D3DXVECTOR4 {
+    pub const fn new() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
+        }
+    }
+}
+
+impl Default for D3DXVECTOR4 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for D3DXVECTOR4 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]", self.x, self.y, self.z, self.w)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct D3DXVECTOR3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl D3DXVECTOR3 {
+    pub const fn new() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+}
+
+impl Default for D3DXVECTOR3 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for D3DXVECTOR3 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{:>10.4} {:>10.4} {:>10.4}]", self.x, self.y, self.z)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct AnimationRecord {
+    pub next: *mut AnimationRecord,
+    pub parent: *mut AnimationRecord,
+    pub transform_start: D3DXMATRIX,
+    pub translation_start: D3DXVECTOR4,
+    pub transform_end: D3DXMATRIX,
+    pub translation_end: D3DXVECTOR4,
+    pub rotation_axis: D3DXVECTOR4,
+    pub rotation_angle: f32,
+    pub rotation_axis_squared: D3DXVECTOR3,
+    pub rotation_axis_cross_terms: D3DXVECTOR4,
+    pub is_record_present: bool,
+    pub unk_d9: u8,
+    pub flag_from_header: u8,
+    pub unk_db: u8,
+    pub disabled: bool,
+    pub pad_db: [u8; 3],
+}
+
+impl AnimationRecord {
+    pub const fn new() -> Self {
+        Self {
+            next: std::ptr::null_mut(),
+            parent: std::ptr::null_mut(),
+            transform_start: D3DXMATRIX::new(),
+            translation_start: D3DXVECTOR4::new(),
+            transform_end: D3DXMATRIX::new(),
+            translation_end: D3DXVECTOR4::new(),
+            rotation_axis: D3DXVECTOR4::new(),
+            rotation_angle: 0.0,
+            rotation_axis_squared: D3DXVECTOR3::new(),
+            rotation_axis_cross_terms: D3DXVECTOR4::new(),
+            is_record_present: false,
+            unk_d9: 0,
+            flag_from_header: 0,
+            unk_db: 0,
+            disabled: false,
+            pad_db: [0; 3],
+        }
+    }
+
+    pub const unsafe fn copy_to(&self, dest: *mut AnimationRecord) {
+        // only want to copy the body, not the links
+        let offset = std::mem::offset_of!(Self, transform_start);
+        let size = size_of::<Self>() - offset;
+
+        let offset = offset as isize;
+        let src = (self as *const Self as *const u8).offset(offset);
+        let dest = (dest as *mut u8).offset(offset);
+
+        std::ptr::copy_nonoverlapping(src, dest, size);
+    }
+
+    pub const fn set_identity(&mut self) {
+        self.transform_start = D3DXMATRIX::identity();
+        self.translation_start = D3DXVECTOR4::new();
+        self.transform_end = D3DXMATRIX::identity();
+        self.translation_end = D3DXVECTOR4::new();
+        self.rotation_axis = D3DXVECTOR4::new();
+    }
+
+    pub const fn set_zero(&mut self) {
+        self.transform_start = D3DXMATRIX::new();
+        self.translation_start = D3DXVECTOR4::new();
+        self.transform_end = D3DXMATRIX::new();
+        self.translation_end = D3DXVECTOR4::new();
+        self.rotation_axis = D3DXVECTOR4::new();
+    }
+
+    pub unsafe fn copy_from_parent(&mut self) {
+        if self.parent.is_null() {
+            return;
+        }
+
+        let parent = &mut *self.parent;
+        self.transform_start = parent.transform_start.clone();
+        self.transform_end = parent.transform_end.clone();
+    }
+}
+
+impl Default for AnimationRecord {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub const JAMES_SKELETON: [i8; 41] = [
+    -1,
+    -1,
+    0,
+    2,
+    1,
+    1,
+    4,
+    5,
+    3,
+    3,
+    3,
+    3,
+    3,
+    6,
+    7,
+    8,
+    11,
+    12,
+    9,
+    10,
+    15,
+    15,
+    15,
+    16,
+    17,
+    13,
+    14,
+    9,
+    10,
+    25,
+    26,
+    27,
+    28,
+    31,
+    32,
+    34,
+    33,
+    33,
+    34,
+    34,
+    33,
+];
+
+// this is a handy reference even if it's not actively used right now
+/*pub const MARIA_SKELETON: [i8; 36] = [
+    -1,
+    -1,
+    0,
+    1,
+    2,
+    1,
+    4,
+    3,
+    5,
+    6,
+    7,
+    4,
+    4,
+    3,
+    3,
+    8,
+    4,
+    4,
+    5,
+    5,
+    10,
+    11,
+    15,
+    16,
+    20,
+    21,
+    22,
+    23,
+    25,
+    27,
+    28,
+    28,
+    29,
+    29,
+    30,
+    32,
+];*/
+
+// value = James, index = Maria
+pub const MARIA_TO_JAMES_SKELETON_MAP: [isize; 36] = [
+    0,  // 0
+    1,  // 1
+    2,  // 2
+    4,  // 3
+    3,  // 4
+    5,  // 5
+    8,  // 6
+    6,  // 7
+    7,  // 8
+    15, // 9
+    13, // 10
+    9,  // 11
+    -1, // 12
+    -1, // 13
+    -1, // 14
+    14, // 15
+    10, // 16
+    -1, // 17
+    -1, // 18
+    -1, // 19
+    25, // 20
+    27, // 21
+    26, // 22
+    28, // 23
+    29, // 24
+    31, // 25
+    30, // 26
+    32, // 27
+    33, // 28
+    34, // 29
+    40, // 30
+    33, // 31
+    35, // 32
+    34, // 33
+    36, // 34
+    39, // 35
+];
+
+pub const MARIA_NUM_BONES: usize = MARIA_TO_JAMES_SKELETON_MAP.len();
 
 pub const NUM_ITEMS: usize = 90;
 pub const WEAPON_INFO_SIZE: usize = 20;
 pub const MARIA_ANIMATION_SIZE: usize = 579536;
 pub const MARIA_ANIMATION_OFFSET: usize = 464;
 pub const JAMES_ANIMATION_OFFSET: usize = 528;
+
+pub const JAMES_IDS: [i16; 2] = [256, 257];
+pub const MARIA_ID: i16 = 270;
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),
@@ -203,3 +568,13 @@ pub const ICON_FLOATS: [f32; NUM_ITEMS] = [
     1.0,
     1.0,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn animation_size() {
+        assert_eq!(size_of::<AnimationRecord>(), 0xE0);
+    }
+}

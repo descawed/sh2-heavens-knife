@@ -14,6 +14,12 @@ use windows::Win32::System::ProcessStatus::{
 };
 use windows::Win32::System::Threading::GetCurrentProcess;
 
+// works with both call and non-short jump
+pub const unsafe fn get_call_target(ptr: *const c_void) -> *const c_void {
+    let original_jump_offset = std::ptr::read_unaligned(ptr.offset(1) as *const isize) + 5; // +5 for instruction size
+    ptr.offset(original_jump_offset)
+}
+
 pub const fn addr_offset(
     from: usize,
     to: usize,
@@ -22,13 +28,12 @@ pub const fn addr_offset(
     to.overflowing_sub(from + inst_size).0.to_le_bytes()
 }
 
-pub fn call(from: usize, to: usize) -> [u8; 5] {
+pub const fn call(from: usize, to: usize) -> [u8; 5] {
     let bytes = addr_offset(from, to, 5);
     [0xE8, bytes[0], bytes[1], bytes[2], bytes[3]]
 }
 
-#[allow(dead_code)]
-pub fn jmp(from: usize, to: usize) -> [u8; 5] {
+pub const fn jmp(from: usize, to: usize) -> [u8; 5] {
     let bytes = addr_offset(from, to, 5);
     [0xE9, bytes[0], bytes[1], bytes[2], bytes[3]]
 }
