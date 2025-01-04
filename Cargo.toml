@@ -16,4 +16,4 @@ anyhow = "1.0.95"
 log = "0.4.22"
 memchr = "2.7.4"
 simplelog = "0.12.2"
-windows = { version = "0.58.0", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_SystemServices", "Win32_System_Threading"] }
+windows = { version = "0.58.0", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse"] }

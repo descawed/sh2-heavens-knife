@@ -38,6 +38,11 @@ pub const fn jmp(from: usize, to: usize) -> [u8; 5] {
     [0xE9, bytes[0], bytes[1], bytes[2], bytes[3]]
 }
 
+pub const fn jz(from: usize, to: usize) -> [u8; 6] {
+    let bytes = addr_offset(from, to, 6);
+    [0x0F, 0x84, bytes[0], bytes[1], bytes[2], bytes[3]]
+}
+
 // supports either call or jmp
 pub unsafe fn set_trampoline(trampoline: &mut [u8], call_offset: usize, to: usize) -> Result<()> {
     let ptr = trampoline.as_ptr();

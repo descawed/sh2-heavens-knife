@@ -149,14 +149,63 @@ impl std::fmt::Display for D3DXVECTOR3 {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum DebugField {
+    None,
+    TransformMatrix,
+    RotationMatrix,
+    TranslationStartVector,
+    TranslationEndVector,
+    RotationAxis,
+    Status,
+}
+
+impl DebugField {
+    pub const fn get_name(&self) -> &'static str {
+        match self {
+            DebugField::None => "None",
+            DebugField::TransformMatrix => "Transform",
+            DebugField::RotationMatrix => "Rotation",
+            DebugField::TranslationStartVector => "Translation Start",
+            DebugField::TranslationEndVector => "Translation End",
+            DebugField::RotationAxis => "Rotation Axis",
+            DebugField::Status => "Status",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            DebugField::None => DebugField::TransformMatrix,
+            DebugField::TransformMatrix => DebugField::RotationMatrix,
+            DebugField::RotationMatrix => DebugField::TranslationStartVector,
+            DebugField::TranslationStartVector => DebugField::TranslationEndVector,
+            DebugField::TranslationEndVector => DebugField::RotationAxis,
+            DebugField::RotationAxis => DebugField::Status,
+            DebugField::Status => DebugField::None,
+        }
+    }
+
+    pub const fn prev(self) -> Self {
+        match self {
+            DebugField::None => DebugField::Status,
+            DebugField::TransformMatrix => DebugField::None,
+            DebugField::RotationMatrix => DebugField::TransformMatrix,
+            DebugField::TranslationStartVector => DebugField::RotationMatrix,
+            DebugField::TranslationEndVector => DebugField::TranslationStartVector,
+            DebugField::RotationAxis => DebugField::TranslationEndVector,
+            DebugField::Status => DebugField::RotationAxis,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct AnimationRecord {
     pub next: *mut AnimationRecord,
     pub parent: *mut AnimationRecord,
-    pub transform_start: D3DXMATRIX,
+    pub transform: D3DXMATRIX,
     pub translation_start: D3DXVECTOR4,
-    pub transform_end: D3DXMATRIX,
+    pub rotation_end: D3DXMATRIX,
     pub translation_end: D3DXVECTOR4,
     pub rotation_axis: D3DXVECTOR4,
     pub rotation_angle: f32,
@@ -175,9 +224,9 @@ impl AnimationRecord {
         Self {
             next: std::ptr::null_mut(),
             parent: std::ptr::null_mut(),
-            transform_start: D3DXMATRIX::new(),
+            transform: D3DXMATRIX::new(),
             translation_start: D3DXVECTOR4::new(),
-            transform_end: D3DXMATRIX::new(),
+            rotation_end: D3DXMATRIX::new(),
             translation_end: D3DXVECTOR4::new(),
             rotation_axis: D3DXVECTOR4::new(),
             rotation_angle: 0.0,
@@ -192,9 +241,21 @@ impl AnimationRecord {
         }
     }
 
+    pub fn get_debug_string(&self, field: DebugField) -> String {
+        match field {
+            DebugField::None => String::new(),
+            DebugField::TransformMatrix => format!("{}", self.transform),
+            DebugField::RotationMatrix => format!("{}", self.rotation_end),
+            DebugField::TranslationStartVector => format!("{}", self.translation_start),
+            DebugField::TranslationEndVector => format!("{}", self.translation_end),
+            DebugField::RotationAxis => format!("{}, angle = {}", self.rotation_axis, self.rotation_angle),
+            DebugField::Status => format!("next: {:#08X}, parent: {:#08X}, present: {}, disabled: {}", self.next as usize, self.parent as usize, self.is_record_present, self.disabled),
+        }
+    }
+
     pub const unsafe fn copy_to(&self, dest: *mut AnimationRecord) {
         // only want to copy the body, not the links
-        let offset = std::mem::offset_of!(Self, transform_start);
+        let offset = std::mem::offset_of!(Self, transform);
         let size = size_of::<Self>() - offset;
 
         let offset = offset as isize;
@@ -205,19 +266,25 @@ impl AnimationRecord {
     }
 
     pub const fn set_identity(&mut self) {
-        self.transform_start = D3DXMATRIX::identity();
+        self.transform = D3DXMATRIX::identity();
         self.translation_start = D3DXVECTOR4::new();
-        self.transform_end = D3DXMATRIX::identity();
+        self.rotation_end = D3DXMATRIX::identity();
         self.translation_end = D3DXVECTOR4::new();
         self.rotation_axis = D3DXVECTOR4::new();
+        self.rotation_angle = 0.0;
+        self.rotation_axis_squared = D3DXVECTOR3::new();
+        self.rotation_axis_cross_terms = D3DXVECTOR4::new();
     }
 
     pub const fn set_zero(&mut self) {
-        self.transform_start = D3DXMATRIX::new();
+        self.transform = D3DXMATRIX::new();
         self.translation_start = D3DXVECTOR4::new();
-        self.transform_end = D3DXMATRIX::new();
+        self.rotation_end = D3DXMATRIX::new();
         self.translation_end = D3DXVECTOR4::new();
         self.rotation_axis = D3DXVECTOR4::new();
+        self.rotation_angle = 0.0;
+        self.rotation_axis_squared = D3DXVECTOR3::new();
+        self.rotation_axis_cross_terms = D3DXVECTOR4::new();
     }
 
     pub unsafe fn copy_from_parent(&mut self) {
@@ -226,8 +293,13 @@ impl AnimationRecord {
         }
 
         let parent = &mut *self.parent;
-        self.transform_start = parent.transform_start.clone();
-        self.transform_end = parent.transform_end.clone();
+        self.transform = parent.transform.clone();
+        self.rotation_end = parent.rotation_end.clone();
+        self.translation_end = parent.translation_end.clone();
+        self.rotation_axis = parent.rotation_axis.clone();
+        self.rotation_angle = parent.rotation_angle;
+        self.rotation_axis_squared = parent.rotation_axis_squared.clone();
+        self.rotation_axis_cross_terms = parent.rotation_axis_cross_terms.clone();
     }
 }
 
@@ -280,6 +352,8 @@ pub const JAMES_SKELETON: [i8; 41] = [
     34,
     33,
 ];
+
+pub const JAMES_NUM_BONES: usize = JAMES_SKELETON.len();
 
 // this is a handy reference even if it's not actively used right now
 /*pub const MARIA_SKELETON: [i8; 36] = [

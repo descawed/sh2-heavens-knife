@@ -1,3 +1,5 @@
+use std::io::Write;
+
 const CHAR_MAP: &str = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
 #[derive(Debug, Clone, Copy)]
@@ -28,18 +30,21 @@ impl ControlCode {
 
 #[derive(Debug)]
 pub struct MessageBuilder<'a> {
-    message_data: &'a mut Vec<u8>,
+    data: &'a mut [u8],
 }
 
 impl<'a> MessageBuilder<'a> {
-    fn new(data: &'a mut Vec<u8>) -> Self {
-        // initialize header - 0x8000 = single-byte mode
-        data.clear();
-        data.extend_from_slice(&[0x00, 0x80]);
+    fn build(mut data: &'a mut [u8], setter: impl FnOnce(&mut Self)) {
+        data.fill(0);
 
-        Self {
-            message_data: data,
-        }
+        // initialize header - 0x8000 = single-byte mode
+        data.write(&[0x00, 0x80]).unwrap();
+
+        let mut builder = Self { data };
+        setter(&mut builder);
+        builder.add_control_code(ControlCode::EndOfMessage);
+        // post-message code; don't fully understand this yet
+        builder.data.write(&[0, 0]).unwrap();
     }
 
     pub fn add_text(&mut self, text: &str) {
@@ -48,46 +53,45 @@ impl<'a> MessageBuilder<'a> {
                 self.add_control_code(ControlCode::LineBreak);
             } else {
                 let index = CHAR_MAP.find(c).unwrap_or(0);
-                self.message_data.push(index as u8);
+                self.data.write(&[index as u8]).unwrap();
             }
         }
     }
 
     pub fn add_control_code(&mut self, code: ControlCode) {
-        self.message_data.extend_from_slice(&code.as_bytes());
-    }
-
-    fn finalize(mut self) {
-        self.add_control_code(ControlCode::EndOfMessage);
-        // post-message code; don't fully understand this yet
-        self.message_data.push(0);
-        self.message_data.push(0);
+        self.data.write(&code.as_bytes()).unwrap();
     }
 }
+
+pub const MESSAGE_MAX_LEN: usize = 0x1000;
 
 #[derive(Debug)]
-pub struct Message {
-    message_data: Vec<u8>,
-}
+pub struct Message([u8; MESSAGE_MAX_LEN]);
 
 impl Message {
     pub const fn new() -> Self {
-        Self {
-            message_data: Vec::new(),
-        }
+        Self([0; MESSAGE_MAX_LEN])
+    }
+
+    pub fn raw(setter: impl FnOnce(&mut MessageBuilder)) -> [u8; MESSAGE_MAX_LEN] {
+        let mut data = [0; MESSAGE_MAX_LEN];
+        MessageBuilder::build(&mut data, setter);
+        data
+    }
+
+    pub fn raw_from_str(s: &str) -> [u8; MESSAGE_MAX_LEN] {
+        Self::raw(|builder| builder.add_text(s))
     }
 
     pub fn set_message(&mut self, setter: impl FnOnce(&mut MessageBuilder)) {
-        let mut builder = MessageBuilder::new(&mut self.message_data);
-        setter(&mut builder);
-        builder.finalize();
+        MessageBuilder::build(&mut self.0, setter);
     }
 
     pub fn set_message_from_str(&mut self, text: &str) {
         self.set_message(|builder| builder.add_text(text));
     }
 
-    pub fn data(&self) -> *const u8 {
-        self.message_data.as_ptr()
+    pub const fn data(&self) -> *const u8 {
+        self.0.as_ptr()
     }
 }
