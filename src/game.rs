@@ -1,3 +1,5 @@
+use std::ffi::{c_void, CStr};
+
 mod msg;
 pub use msg::*;
 
@@ -309,6 +311,203 @@ impl Default for AnimationRecord {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct FileInfo {
+    pub path: *const std::ffi::c_char,
+    pub size: usize,
+    pub offset: usize,
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct CharacterBuffers {
+    pub character_id: i32,
+    pub unk04: u32,
+    pub model_buffer1: *mut u8,
+    pub model_buffer2: *mut u8,
+    pub model_data_ptr: *mut u8,
+    pub animation_buffer: *mut u8,
+    pub cls_buffer: *mut u8,
+    pub kg1_buffer: *mut u8,
+    pub unk20: [u8; 116],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct LoadedFile {
+    pub file_info: *const FileInfo,
+    pub buffer: *mut u8,
+    pub size: usize,
+}
+
+const JAMES_FILE_PATH: &[u8] = b"data/chr/jms/";
+const MARIA_FILE_PATH: &[u8] = b"data/chr2/mar/";
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct CharacterFiles {
+    pub unk00: u8,
+    pub unk01: u8,
+    pub character_id: i16,
+    pub model: LoadedFile,
+    pub animation: LoadedFile,
+    pub kg1: LoadedFile,
+    pub cls: LoadedFile,
+}
+
+impl CharacterFiles {
+    unsafe fn animation_path_contains(&self, search: &[u8]) -> bool {
+        let Some(animation_file) = self.animation.file_info.as_ref() else {
+            return false;
+        };
+
+        let animation_path = CStr::from_ptr(animation_file.path);
+        animation_path.to_bytes().windows(search.len()).any(|window| window == search)
+    }
+
+    pub unsafe fn is_using_james_animation(&self) -> bool {
+        self.animation_path_contains(JAMES_FILE_PATH)
+    }
+
+    pub unsafe fn is_using_maria_animation(&self) -> bool {
+        self.animation_path_contains(MARIA_FILE_PATH)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct AnimationDescription {
+    pub id: u16,
+    pub num_frames: u16,
+    pub unk04: i16,
+    pub frame_index_start: u16,
+    pub frame_index_end: u16,
+    pub unk0a: u16,
+}
+
+impl AnimationDescription {
+    pub fn set_start_index(&mut self, index: usize) {
+        self.frame_index_start = index as u16;
+        self.frame_index_end = (self.frame_index_start + self.num_frames) - 1;
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct Animation {
+    pub records: *mut AnimationRecord,
+    pub data_start: *const u8,
+    pub data_cursor: *const u8,
+    pub original_data_start: *const u8,
+    pub original_data_cursor: *const u8,
+    pub frame_size: usize,
+    pub anim_steps_elapsed: i32,
+    pub frame_steps_elapsed1: u32,
+    pub frame_steps_elapsed2: u32,
+    pub unk24: i16,
+    pub unk26: u16,
+    pub unk28: i16,
+    pub unk2a: i16,
+    pub current_frame_index: u16,
+    pub next_frame_index: u16,
+    pub unk30: u8,
+    pub state: i8,
+    pub unk32: u16,
+    pub description1: *const AnimationDescription,
+    pub description2: *const AnimationDescription,
+    pub rot_vec3c: D3DXVECTOR4,
+    pub rot_vec4c: D3DXVECTOR4,
+    pub rot_vec5c: D3DXVECTOR4,
+    pub rot_vec6c: D3DXVECTOR4,
+    pub unk7c: f32,
+}
+
+impl Animation {
+    pub const fn is_playing_hit_reaction(&self) -> bool {
+        self.next_frame_index as usize >= WEAPON_ANIM_NUM_FRAMES
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct HitInformation {
+    pub vec00: D3DXVECTOR4,
+    pub vec10: D3DXVECTOR4,
+    pub attack_id: u16,
+    pub unk22: u16,
+    pub unk24: u32,
+    pub damage_received: f32,
+    pub unk_hit_value2c: f32,
+    pub hit_received_type: u32,
+    pub unk30: [u8; 16],
+    pub unk44: *const c_void,
+    pub current_health: f32,
+    pub max_health: f32,
+    pub current_health_percent: f32,
+    pub flags54: u32,
+    pub unk58: [u8; 20],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct Character {
+    pub float000: f32,
+    pub flags004: u32,
+    pub unk008: u32,
+    pub unk00c: u32,
+    pub id: i16,
+    pub id_counter: u16,
+    pub unk014: u32,
+    pub unk018: u32,
+    pub position: D3DXVECTOR4,
+    pub rotation: D3DXVECTOR4,
+    pub unk03c: D3DXVECTOR4,
+    pub unk04c: D3DXVECTOR4,
+    pub transform: D3DXMATRIX,
+    pub animation_records: *mut AnimationRecord,
+    pub unk0a0: f32,
+    pub unk0a4: f32,
+    pub unk0a8: u32,
+    pub unk0ac: u32,
+    pub unk0b0: u32,
+    pub unk0b4: f32,
+    pub vec0b8: D3DXVECTOR4,
+    pub unk0c8: f32,
+    pub prev_position: D3DXVECTOR4,
+    pub prev_rotation: D3DXVECTOR4,
+    pub unk0ec: u32,
+    pub unk0f0: u32,
+    pub hit_information: HitInformation,
+    pub unk160: [u8; 40],
+    pub unk188: *const c_void,
+    pub unk18c: u32,
+    pub prev: *mut Character,
+    pub next: *mut Character,
+    pub weapon_index: i8,
+    pub unk199: [u8; 3],
+    pub unk19c: u32,
+    pub animation1: Animation,
+    pub animation2: Animation,
+    pub unk2a0: *const c_void,
+    pub model_buffer2: *mut u8,
+    pub model_buffer3: *mut u8,
+    pub model_buffer4: *mut u8,
+    pub unk2b0: u32,
+    pub unk2b4: u32,
+    pub model_buffer1: *mut u8,
+    pub animation_buffer: *mut u8,
+    pub cls_buffer: *mut u8,
+    pub unk2c4: [u8; 8],
+}
+
+impl Character {
+    pub const fn is_playing_hit_reaction(&self) -> bool {
+        self.animation1.is_playing_hit_reaction() || self.animation2.is_playing_hit_reaction()
+    }
+}
+
 pub const JAMES_SKELETON: [i8; 41] = [
     -1,
     -1,
@@ -428,9 +627,9 @@ pub const MARIA_TO_JAMES_SKELETON_MAP: [isize; 36] = [
     33, // 28
     34, // 29
     40, // 30
-    33, // 31
+    -1, // 31
     35, // 32
-    34, // 33
+    -1, // 33
     36, // 34
     39, // 35
 ];
@@ -439,12 +638,23 @@ pub const MARIA_NUM_BONES: usize = MARIA_TO_JAMES_SKELETON_MAP.len();
 
 pub const NUM_ITEMS: usize = 90;
 pub const WEAPON_INFO_SIZE: usize = 20;
-pub const MARIA_ANIMATION_SIZE: usize = 579536;
-pub const MARIA_ANIMATION_OFFSET: usize = 464;
-pub const JAMES_ANIMATION_OFFSET: usize = 528;
+pub const MARIA_ANIMATION_FRAME_SIZE: usize = 464;
+pub const JAMES_ANIMATION_FRAME_SIZE: usize = 528;
 
 pub const JAMES_IDS: [i16; 2] = [256, 257];
-pub const MARIA_ID: i16 = 270;
+pub const MARIA_ID: i16 = 270; // this ID is specifically for Maria as the player, not as an NPC
+
+pub const JAMES_WEAPON_ANIM_SIZE: usize = 540672;
+pub const MARIA_WEAPON_ANIM_SIZE: usize = 579536;
+pub const WEAPON_ANIM_NUM_FRAMES: usize = 1024;
+
+pub const MARIA_NUM_HIT_REACTIONS: usize = 11;
+pub const MARIA_ANIM_HIT_REACTIONS_START_OFFSET: usize = WEAPON_ANIM_NUM_FRAMES * MARIA_ANIMATION_FRAME_SIZE;
+pub const MARIA_HIT_REACTIONS_ANIM_SIZE: usize = MARIA_WEAPON_ANIM_SIZE - MARIA_ANIM_HIT_REACTIONS_START_OFFSET;
+
+pub const MARIA_MIN_FRAMES_FOR_JAMES_ANIM: usize = JAMES_WEAPON_ANIM_SIZE.div_ceil(MARIA_ANIMATION_FRAME_SIZE);
+pub const MARIA_BYTES_FOR_JAMES_ANIM: usize = MARIA_MIN_FRAMES_FOR_JAMES_ANIM * MARIA_ANIMATION_FRAME_SIZE;
+pub const MARIA_ANIM_BUFFER_BYTES_NEEDED: usize = MARIA_BYTES_FOR_JAMES_ANIM + MARIA_HIT_REACTIONS_ANIM_SIZE;
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),
@@ -650,5 +860,26 @@ mod tests {
     #[test]
     fn animation_size() {
         assert_eq!(size_of::<AnimationRecord>(), 0xE0);
+    }
+
+    #[test]
+    fn description_size() {
+        assert_eq!(size_of::<AnimationDescription>(), 12);
+    }
+
+    #[test]
+    fn character_size() {
+        assert_eq!(size_of::<Character>(), 0x2cc);
+    }
+
+    #[test]
+    fn animation_file_size() {
+        assert_eq!(JAMES_WEAPON_ANIM_SIZE % JAMES_ANIMATION_FRAME_SIZE, 0);
+        assert_eq!(MARIA_WEAPON_ANIM_SIZE % MARIA_ANIMATION_FRAME_SIZE, 0);
+    }
+
+    #[test]
+    fn override_animation_size() {
+        assert!(MARIA_BYTES_FOR_JAMES_ANIM + MARIA_HIT_REACTIONS_ANIM_SIZE > MARIA_WEAPON_ANIM_SIZE);
     }
 }

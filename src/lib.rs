@@ -1,8 +1,12 @@
 #![allow(static_mut_refs)]
 
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
 use std::fs::File;
+use std::io::{Seek, SeekFrom};
 use std::panic;
+use std::path::Path;
+use std::os::windows::fs::FileExt;
+
 use anyhow::{bail, Result};
 use simplelog::{Config, LevelFilter, WriteLogger};
 use windows::Win32::Foundation::{BOOL, HMODULE};
@@ -17,7 +21,11 @@ mod patch;
 mod input;
 
 // search strings to find the areas we want to patch
-const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex";
+const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex\0";
+const COLT_ANIM_NAME: &CStr = c"data/chr2/mar/xmar_wpcolt.anm";
+const ADDRESS_SET_MSG: &[u8] = b"bg_chara.c:Cant't set character address.";
+const DEMO_ANIM_NAME: &[u8] = b"data/demo/jisatsu_a/bos.anm";
+const ANIM_SOURCE_FILE: &[u8] = b"\\projects\\sh2pc\\src\\Chacter\\m3_sc.c";
 const JAMES_ICON_DRAW_LOOP: [u8; 16] = [
     0x66, 0x8B, 0x50, 0x04, 0x66, 0x2B, 0x10, 0x83, 0xC0, 0x3C, 0x66, 0x89, 0x51, 0xFE, 0x66, 0x8B,
 ];
@@ -47,6 +55,9 @@ const ANIMATION_READ_FUNC: [u8; 16] = [
 ];*/
 const DRAW_MESSAGE_FUNC: [u8; 9] = [
     0x8B, 0x44, 0x24, 0x04, 0x85, 0xC0, 0x75, 0x06, 0xA3,
+];
+const HIT_ANIMATION_FUNC: [u8; 11] = [
+    0x0E, 0x01, 0x56, 0x75, 0x44, 0x81, 0xFF, 0x21, 0x4E, 0x00, 0x00,
 ];
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -379,17 +390,46 @@ impl JamesAnimationContainer {
     }
 }
 
+/*#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayerAnimationState {
+    Unknown,
+    MariaPlayingMaria,
+    MariaPlayingJames,
+    JamesPlayingMaria,
+    JamesPlayingJames,
+}
+
+impl PlayerAnimationState {
+    pub const fn is_normal(&self) -> bool {
+        matches!(self, Self::MariaPlayingMaria | Self::JamesPlayingJames)
+    }
+
+    pub const fn is_modded(&self) -> bool {
+        matches!(self, Self::MariaPlayingJames | Self::JamesPlayingMaria)
+    }
+}*/
+
 struct PersistentData {
-    pub equipped_item_id: *mut u8,
+    equipped_item_id: *mut u8,
     pub james_anim_offset_thunk: [u8; 16],
     pub maria_anim_offset_thunk: [u8; 16],
     pub anim_read_thunk: [u8; 21],
     pub after_anim_read_thunk: [u8; 14],
     pub after_maria_anim_read_thunk: [u8; 17],
+    pub anim_description_change_thunk: [u8; 16],
     pub animation_temp1: JamesAnimationContainer,
     pub animation_temp2: JamesAnimationContainer,
     pub original_animation1: *mut game::AnimationRecord,
     pub original_animation2: *mut game::AnimationRecord,
+    player_character_flag: *const u8,
+    request_file_size: Option<unsafe extern "C" fn(file: *const game::FileInfo) -> usize>,
+    get_character_buffers: Option<unsafe extern "C" fn(character_id: i32) -> *mut game::CharacterBuffers>,
+    get_character_frame_size: Option<unsafe extern "C" fn(character_id: i32) -> usize>,
+    maria_hit_reactions: [u8; game::MARIA_HIT_REACTIONS_ANIM_SIZE],
+    character_files: *mut game::CharacterFiles,
+    character_files_end: *mut game::CharacterFiles,
+    maria_hit_reaction_descriptions: *mut game::AnimationDescription,
+    player_ptr: *mut *mut game::Character,
 }
 
 impl PersistentData {
@@ -456,16 +496,65 @@ impl PersistentData {
                 0x83, 0xC4, 0x20, // add esp, 0x20
                 0xE9, 0, 0, 0, 0, // jmp <return>
             ],
+            anim_description_change_thunk: [
+                0x52, // push edx ; character
+                0x8B, 0x54, 0x24, 0x28, // mov edx, [esp+40]
+                0x52, // push edx ; animation description
+                0x51, // push ecx ; animation
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x59, // pop ecx
+                0x5A, // pop edx
+                0x5A, // pop edx
+                0xC3, // ret
+            ],
             animation_temp1: JamesAnimationContainer::new(),
             animation_temp2: JamesAnimationContainer::new(),
             original_animation1: std::ptr::null_mut(),
             original_animation2: std::ptr::null_mut(),
+            player_character_flag: std::ptr::null(),
+            request_file_size: None,
+            get_character_buffers: None,
+            get_character_frame_size: None,
+            maria_hit_reactions: [0; game::MARIA_HIT_REACTIONS_ANIM_SIZE],
+            character_files: std::ptr::null_mut(),
+            character_files_end: std::ptr::null_mut(),
+            maria_hit_reaction_descriptions: std::ptr::null_mut(),
+            player_ptr: std::ptr::null_mut(),
         }
     }
 
-    fn init(&mut self, skeleton: &[i8]) {
+    fn init(&mut self, skeleton: &[i8], equipped_item_id: *mut u8, player_character_flag: *const u8, request_file_size: usize, get_character_buffers: usize,
+        character_files: *mut game::CharacterFiles, character_files_end: *mut game::CharacterFiles, maria_hit_reactions_descriptions: *mut game::AnimationDescription,
+        player_ptr: *mut *mut game::Character, get_character_frame_size: usize) -> Result<()> {
         self.animation_temp1.init(skeleton);
         self.animation_temp2.init(skeleton);
+        self.equipped_item_id = equipped_item_id;
+        self.player_character_flag = player_character_flag;
+        self.request_file_size = Some(unsafe { std::mem::transmute(request_file_size) });
+        self.get_character_buffers = Some(unsafe { std::mem::transmute(get_character_buffers) });
+        self.get_character_frame_size = Some(unsafe { std::mem::transmute(get_character_frame_size) });
+        self.character_files = character_files;
+        self.character_files_end = character_files_end;
+        self.maria_hit_reaction_descriptions = maria_hit_reactions_descriptions;
+        self.player_ptr = player_ptr;
+        self.load_maria_hit_reactions()
+    }
+
+    fn load_maria_hit_reactions(&mut self) -> Result<()> {
+        // TODO: can we always assume the cwd is the game dir?
+        let maria_anim_path = Path::new(COLT_ANIM_NAME.to_str()?);
+        let mut file = File::open(maria_anim_path)?;
+        // FIXME: this should technically read in a loop
+        let bytes_read = file.seek_read(&mut self.maria_hit_reactions, game::MARIA_ANIM_HIT_REACTIONS_START_OFFSET as u64)?;
+        if bytes_read != self.maria_hit_reactions.len() {
+            bail!("Failed to read expected amount of data from Maria animation {}: read {} out of {} bytes", maria_anim_path.display(), bytes_read, self.maria_hit_reactions.len());
+        }
+        let file_size = file.seek(SeekFrom::End(0))?;
+        if file_size != game::MARIA_WEAPON_ANIM_SIZE as u64 {
+            bail!("Unexpected file size for Maria animation: {}", maria_anim_path.display());
+        }
+
+        Ok(())
     }
 
     unsafe fn patch_animations_before_read(&mut self, animation1_ptr: *mut *mut game::AnimationRecord, animation2_ptr: *mut *mut game::AnimationRecord) {
@@ -495,69 +584,238 @@ impl PersistentData {
         *animation_ptr2 = self.original_animation2;
         self.original_animation2 = std::ptr::null_mut();
     }
+
+    const unsafe fn is_player_maria(&self) -> bool {
+        *self.player_character_flag == 1
+    }
+
+    const unsafe fn equipped_item_id(&self) -> u8 {
+        *self.equipped_item_id
+    }
+
+    const unsafe fn is_player_id(id: i16) -> bool {
+        id == game::MARIA_ID || id == game::JAMES_IDS[0] || id == game::JAMES_IDS[1]
+    }
+
+    const unsafe fn player(&self) -> *mut game::Character {
+        if self.player_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let player = *self.player_ptr;
+        let Some(player_ref) = player.as_ref() else {
+            return std::ptr::null_mut();
+        };
+
+        // as a sanity check, make sure our "player" actually has a player character's ID
+        if !Self::is_player_id(player_ref.id) {
+            return std::ptr::null_mut();
+        }
+
+        player
+    }
+
+    unsafe fn request_file_size(&self, file: *const game::FileInfo) -> usize {
+        self.request_file_size.unwrap()(file)
+    }
+
+    unsafe fn get_character_buffers(&self, character_id: i32) -> *mut game::CharacterBuffers {
+        self.get_character_buffers.unwrap()(character_id)
+    }
+
+    unsafe fn get_character_frame_size(&self, character_id: i32) -> usize {
+        self.get_character_frame_size.unwrap()(character_id)
+    }
+
+    unsafe fn get_character_files(&self, character_id: i16) -> *mut game::CharacterFiles {
+        let mut file_ptr = self.character_files;
+        while file_ptr < self.character_files_end {
+            let files = file_ptr.as_ref().expect("character files pointer should not be null");
+            if files.character_id == character_id {
+                return file_ptr;
+            }
+
+            file_ptr = file_ptr.offset(1);
+        }
+
+        std::ptr::null_mut()
+    }
+
+    unsafe fn get_character_files_by_animation_buffer(&self, animation_buffer: *mut u8) -> *mut game::CharacterFiles {
+        // any unused character file slot or object without an animation will have null buffers,
+        // so we don't want to return bogus results for those
+        if animation_buffer.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let mut file_ptr = self.character_files;
+        while file_ptr < self.character_files_end {
+            let files = file_ptr.as_ref().expect("character files pointer should not be null");
+            if files.animation.buffer == animation_buffer {
+                return file_ptr;
+            }
+
+            file_ptr = file_ptr.offset(1);
+        }
+
+        std::ptr::null_mut()
+    }
+
+    unsafe fn get_maria_files(&self) -> *mut game::CharacterFiles {
+        self.get_character_files(game::MARIA_ID)
+    }
+
+    unsafe fn get_james_files(&self) -> *mut game::CharacterFiles {
+        let files = self.get_character_files(game::JAMES_IDS[0]);
+        if !files.is_null() {
+            return files;
+        }
+
+        self.get_character_files(game::JAMES_IDS[1])
+    }
+
+    unsafe fn get_player_files(&self) -> *mut game::CharacterFiles {
+        // the game can put a James ID on Maria's files when running a James animation and vice
+        // versa, so we'll check for all player IDs regardless of which character the player is,
+        // but we'll check for the expected character first
+        if self.is_player_maria() {
+            let files = self.get_maria_files();
+            if !files.is_null() {
+                return files;
+            }
+
+            self.get_james_files()
+        } else {
+            let files = self.get_james_files();
+            if !files.is_null() {
+                return files;
+            }
+
+            self.get_maria_files()
+        }
+    }
+
+    /*unsafe fn get_player_animation_state(&self) -> PlayerAnimationState {
+        let Some(files) = self.get_player_files().as_ref() else {
+            return PlayerAnimationState::Unknown;
+        };
+
+        match (self.is_player_maria(), files.is_using_james_animation(), files.is_using_maria_animation()) {
+            (true, false, _) => PlayerAnimationState::MariaPlayingMaria,
+
+        }
+    }*/
+
+    unsafe fn is_james_animation_buffer(&self, animation_buffer: *mut u8) -> bool {
+        self.get_character_files_by_animation_buffer(animation_buffer).as_ref().map(|buf| unsafe { buf.is_using_james_animation() }).unwrap_or(false)
+    }
+
+    unsafe fn append_maria_hit_reactions_to_james_animation(&self, animation_buffer: *mut u8) {
+        let hit_reaction_buffer = animation_buffer.offset(game::MARIA_BYTES_FOR_JAMES_ANIM as isize);
+        hit_reaction_buffer.copy_from_nonoverlapping(self.maria_hit_reactions.as_ptr(), self.maria_hit_reactions.len());
+    }
+
+    unsafe fn set_maria_hit_reactions_start_index(&self, index: usize) {
+        let mut anim_description = self.maria_hit_reaction_descriptions;
+        let mut offset = 0;
+        for _ in 0..game::MARIA_NUM_HIT_REACTIONS {
+            let description = anim_description.as_mut().expect("animation description pointer should not be null");
+            if description.id == 0 {
+                // ID 0 is the end marker
+                break;
+            }
+
+            description.set_start_index(index + offset);
+            offset += description.num_frames as usize;
+
+            anim_description = anim_description.offset(1);
+        }
+    }
+
+    const fn get_default_frame_size(is_player_maria: bool) -> usize {
+        if is_player_maria {
+            game::MARIA_ANIMATION_FRAME_SIZE
+        } else {
+            game::JAMES_ANIMATION_FRAME_SIZE
+        }
+    }
+
+    unsafe fn get_player_animation_frame_size_with_index(&self, frame_index: Option<usize>) -> usize {
+        let is_player_maria = self.is_player_maria();
+
+        let Some(files) = self.get_player_files().as_ref() else {
+            return Self::get_default_frame_size(is_player_maria);
+        };
+
+        if is_player_maria && !files.is_using_james_animation() {
+            game::MARIA_ANIMATION_FRAME_SIZE
+        } else if !is_player_maria && !files.is_using_maria_animation() {
+            game::JAMES_ANIMATION_FRAME_SIZE
+        } else if let Some(frame_index) = frame_index {
+            // if we're past the end of the normal animation area, that means we've played into a
+            // hit reaction, which uses the character's normal frame size. otherwise, we need to
+            // swap the frame size.
+            if is_player_maria == (frame_index >= game::WEAPON_ANIM_NUM_FRAMES) {
+                game::MARIA_ANIMATION_FRAME_SIZE
+            } else {
+                game::JAMES_ANIMATION_FRAME_SIZE
+            }
+        } else {
+            Self::get_default_frame_size(is_player_maria)
+        }
+    }
+
+    unsafe fn get_player_animation_frame_size(&self) -> usize {
+        self.get_player_animation_frame_size_with_index(self.player().as_ref().map(|player| player.animation1.next_frame_index as usize))
+    }
 }
 
 static mut GLOBAL: PersistentData = PersistentData::new();
 static mut CONTROL_PANEL: ControlPanel = ControlPanel::new();
 
-const fn is_maria_animation(equipped_item_id: u8, is_james: bool) -> bool {
-    // 10 = Colt, 17 = Cleaver, 0 = none
-    equipped_item_id == 10 || equipped_item_id == 17 || (equipped_item_id == 0 && !is_james)
+unsafe fn is_maria_player(character_id: i16) -> bool {
+    PersistentData::is_player_id(character_id) && GLOBAL.is_player_maria()
 }
 
-const fn get_animation_offset(equipped_item_id: u8, is_james: bool) -> usize {
-    // FIXME: this might actually break Maria in the main scenario. need to reference the variable
-    //  for the actual player character
-    if is_maria_animation(equipped_item_id, is_james) {
-        game::MARIA_ANIMATION_OFFSET
-    } else {
-        game::JAMES_ANIMATION_OFFSET
-    }
+unsafe extern "C" fn get_frame_size() -> usize {
+    GLOBAL.get_player_animation_frame_size()
 }
 
-unsafe extern "C" fn get_james_animation_offset() -> usize {
-    get_animation_offset(*GLOBAL.equipped_item_id, true)
-}
+unsafe extern "C" fn patch_animations_before_read(character: *mut game::Character) -> i32 {
+    let character = character.as_mut().expect("character pointer should not be null");
 
-unsafe extern "C" fn get_maria_animation_offset() -> usize {
-    get_animation_offset(*GLOBAL.equipped_item_id, false)
-}
-
-const unsafe fn get_character_info(character: *mut u8) -> (i16, *mut *mut game::AnimationRecord, *mut *mut game::AnimationRecord) {
-    let character_id = *(character.offset(0x10) as *const i16);
-    let animation1_ptr = character.offset(0x1A0) as *mut *mut game::AnimationRecord;
-    let animation2_ptr = character.offset(0x220) as *mut *mut game::AnimationRecord;
-    (character_id, animation1_ptr, animation2_ptr)
-}
-
-unsafe extern "C" fn patch_animations_before_read(character: *mut u8) -> i32 {
     // watch for control panel interactions
     CONTROL_PANEL.update_settings();
-
-    let (character_id, animation1_ptr, animation2_ptr) = get_character_info(character);
     // TODO: support James
-    if character_id != game::MARIA_ID {
-        return character_id as i32;
+    if !is_maria_player(character.id) {
+        return character.id as i32;
     }
 
-    let is_maria_animation = is_maria_animation(*GLOBAL.equipped_item_id, false);
-    if is_maria_animation {
-        return character_id as i32;
+    // if Maria isn't playing a James animation, we don't need to patch anything
+    if !GLOBAL.is_james_animation_buffer(character.animation_buffer) {
+        return character.id as i32;
+    }
+
+    // as one last step, we have Maria use her own hit reaction animations even when playing a
+    // James animation, so we need to not do the patching if we're running an animation out of the
+    // hit reaction portion of the buffer
+    if character.is_playing_hit_reaction() {
+        return character.id as i32;
     }
 
     // this is a James animation. override Maria's animation lists with ours.
-    GLOBAL.patch_animations_before_read(animation1_ptr, animation2_ptr);
+    GLOBAL.patch_animations_before_read(&raw mut character.animation1.records, &raw mut character.animation2.records);
     game::JAMES_IDS[0] as i32
 }
 
-unsafe extern "C" fn patch_animations_after_read_maria(character: *mut u8) {
-    let (character_id, animation1_ptr, _) = get_character_info(character);
+unsafe extern "C" fn patch_animations_after_read_maria(character: *mut game::Character) {
+    let character = character.as_mut().expect("character pointer should not be null");
 
     // we're not doing any mapping if we get here, but let's still update the control panel display
-    let debug_text = match (character_id, CONTROL_PANEL.get_settings()) {
+    let debug_text = match (character.id, CONTROL_PANEL.get_settings()) {
         (_, Some((_, _, game::DebugField::None, _))) => String::new(),
         (game::MARIA_ID, Some((false, bone_index, debug_field, _))) => {
-            let record = (*animation1_ptr).offset(bone_index as isize).as_ref().expect("animation pointer should not be null");
+            let record = character.animation1.records.offset(bone_index as isize).as_ref().expect("animation pointer should not be null");
             record.get_debug_string(debug_field)
         }
         _ => String::new(),
@@ -566,23 +824,93 @@ unsafe extern "C" fn patch_animations_after_read_maria(character: *mut u8) {
     CONTROL_PANEL.display(&debug_text);
 }
 
-unsafe extern "C" fn patch_animations_after_read(character: *mut u8) {
-    let (character_id, animation1_ptr, animation2_ptr) = get_character_info(character);
+unsafe extern "C" fn patch_animations_after_read(character: *mut game::Character) {
+    let character = character.as_mut().expect("character pointer should not be null");
 
     // TODO: support James
     // if we don't have original animation pointers, we didn't do anything
-    if character_id != game::MARIA_ID || GLOBAL.original_animation1.is_null() || GLOBAL.original_animation2.is_null() {
+    if !is_maria_player(character.id) || GLOBAL.original_animation1.is_null() || GLOBAL.original_animation2.is_null() {
         return;
     }
 
     // update the original animations with the data from the temporary animations
-    GLOBAL.patch_animations_after_read(animation1_ptr, animation2_ptr);
+    GLOBAL.patch_animations_after_read(&raw mut character.animation1.records, &raw mut character.animation2.records);
+}
+
+unsafe extern "C" fn override_maria_animation_buffer_size(file: *mut game::FileInfo) -> usize {
+    let file_size = GLOBAL.request_file_size(file);
+
+    let Some(file) = file.as_mut() else {
+        log::warn!("Unexpected null FileInfo pointer when overriding Maria animation size");
+        return file_size;
+    };
+    // sanity check
+    let path = CStr::from_ptr(file.path);
+    if path != COLT_ANIM_NAME {
+        log::error!("Unexpected file path when overriding Maria animation size: {}", path.to_string_lossy());
+        return file_size;
+    }
+
+    // allocate animation buffer large enough to hold a James animation + Maria's hit reactions
+    // additionally, the size allocated for the James animation has to be a multiple of Maria's
+    // frame size to avoid issues when we play a hit reaction
+    game::MARIA_ANIM_BUFFER_BYTES_NEEDED
+}
+
+unsafe extern "C" fn append_hit_reactions(character_id: i32) -> *mut game::CharacterBuffers {
+    let buffers = GLOBAL.get_character_buffers(character_id);
+
+    // TODO: support James
+    if !is_maria_player(character_id as i16) {
+        return buffers;
+    }
+
+    // we only want to patch if we're Maria and we're playing a James animation
+    // when Maria is playing a James animation, the character ID on the character resources can
+    // get changed to James, so we'll look up the character files by animation buffer instead of ID
+    let Some(files) = buffers.as_ref().and_then(|buf| GLOBAL.get_character_files_by_animation_buffer(buf.animation_buffer).as_mut()) else {
+        return buffers;
+    };
+
+    if !PersistentData::is_player_id(files.character_id) {
+        log::error!("Unexpected character ID found with same animation buffer as player: {}", files.character_id);
+        return buffers;
+    }
+
+    if files.is_using_james_animation() {
+        // we're using a James animation - patch hit reactions into the end of the buffer
+        GLOBAL.append_maria_hit_reactions_to_james_animation(files.animation.buffer);
+        // also patch the hit reaction animation descriptions to point to the correct area in the
+        // buffer
+        GLOBAL.set_maria_hit_reactions_start_index(game::MARIA_MIN_FRAMES_FOR_JAMES_ANIM);
+    } else {
+        // we're not using a James animation. we don't need to patch the animation buffer, but we
+        // should restore the hit reaction indexes to their original values in case we were using
+        // a James animation before this.
+        GLOBAL.set_maria_hit_reactions_start_index(game::WEAPON_ANIM_NUM_FRAMES);
+    }
+
+    buffers
+}
+
+unsafe extern "C" fn hook_animation_description_change(_animation: *mut game::Animation, description: *mut game::AnimationDescription, character: *mut game::Character) -> usize {
+    let Some(character) = character.as_ref() else {
+        log::warn!("Unexpected null character pointer when hooking animation description change");
+        return 0;
+    };
+
+    if PersistentData::is_player_id(character.id) {
+        GLOBAL.get_player_animation_frame_size_with_index(description.as_ref().map(|d| d.frame_index_start as usize))
+    } else {
+        GLOBAL.get_character_frame_size(character.id as i32)
+    }
 }
 
 fn open_log() -> Result<()> {
     let log_file = File::create("sh2hvnknf.log")?;
     WriteLogger::init(LevelFilter::Debug, Config::default(), log_file)?;
     panic::set_hook(Box::new(|info| {
+        // FIXME: need to handle String as well as &str
         let msg = info.payload().downcast_ref::<&str>().unwrap_or(&"unknown");
         let (file, line) = info
             .location()
@@ -608,12 +936,22 @@ fn main(reason: u32) -> Result<()> {
 
     let sh2pc = &["sh2pc.exe"];
 
-    let [Some(tex_address)] = searcher.find_bytes(&[ICON_TEX_NAME], Some(PAGE_READONLY), sh2pc)? else {
-        bail!("Failed to find item icon texture name");
+    let [
+        Some(tex_address),
+        Some(colt_anim_address),
+        Some(address_set_msg_address),
+        Some(demo_anim_address),
+        Some(anim_source_file_address),
+    ] = searcher.find_bytes(&[ICON_TEX_NAME, COLT_ANIM_NAME.to_bytes(), ADDRESS_SET_MSG, DEMO_ANIM_NAME, ANIM_SOURCE_FILE], Some(PAGE_READONLY), sh2pc)? else {
+        bail!("Failed to find read-only data");
     };
+    let colt_anim_address = colt_anim_address as usize;
+    let address_set_msg_address = address_set_msg_address as usize;
+    let demo_anim_address = demo_anim_address as usize;
+    let anim_source_file_address = anim_source_file_address as usize;
     log::debug!(
-        "Found item menu texture path at {:#08X}",
-        tex_address as usize,
+        "Found item menu texture path at {:#08X}, colt animation path at {:#08X}, address set msg at {:#08X}, demo anim address at {:#08X}, anim source file address at {:#08X}",
+        tex_address as usize, colt_anim_address, address_set_msg_address, demo_anim_address, anim_source_file_address,
     );
 
     let mut menu_data: [u8; 16] = [0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 1, 0, 0, 0];
@@ -623,24 +961,43 @@ fn main(reason: u32) -> Result<()> {
     let icon_coords_ptr = game::ICON_COORDS.as_ptr() as *const u8;
     let icon_coords_buf = unsafe { std::slice::from_raw_parts(icon_coords_ptr, 12) };
 
-    let [Some(menu_address), Some(icon_coord_address)] = searcher.find_bytes(
-        &[&menu_data, icon_coords_buf],
+    let [Some(menu_address), Some(icon_coord_address), Some(colt_anim_file_address), Some(demo_anim_file_address)] = searcher.find_bytes(
+        &[&menu_data, icon_coords_buf, &colt_anim_address.to_le_bytes(), &demo_anim_address.to_le_bytes()],
         Some(PAGE_READWRITE | PAGE_WRITECOPY),
         sh2pc,
     )? else {
         bail!("Failed to find .data values");
     };
     log::debug!(
-        "Found menu data at {:#08X}, icon coords at {:#08X}",
+        "Found menu data at {:#08X}, icon coords at {:#08X}, Colt anim file at {:#08X}, demo anim file at {:#08X}",
         menu_address as usize,
         icon_coord_address as usize,
+        colt_anim_file_address as usize,
+        demo_anim_file_address as usize,
     );
 
     // Maria vs James texture check
     let mut tex_ref_data: [u8; 7] = [0x50, 0x68, 0, 0, 0, 0, 0xE8];
     tex_ref_data[2..6].copy_from_slice(&(menu_address as usize).to_le_bytes());
+    // reference to Colt anim when allocating buffers
+    let colt_anim_data = patch::push(colt_anim_file_address as usize);
+    // message about failing to set addresses shortly after calling SetCharacterAddresses
+    let address_set_msg_data = patch::push(address_set_msg_address);
+    // animation referenced near a reference to the player pointer
+    let demo_anim_data = patch::push(demo_anim_file_address as usize);
+
+    let source_bytes = anim_source_file_address.to_le_bytes();
+    let anim_source_file_data = [
+        0x68, 0x2B, 0x08, 0x00, 0x00, // push 2091
+        0x68, source_bytes[0], source_bytes[1], source_bytes[2], source_bytes[3], // push <filename>
+    ];
+
     let [
         Some(tex_ref_call_address),
+        Some(colt_anim_push_address),
+        Some(address_set_msg_push_address),
+        Some(demo_anim_push_address),
+        Some(anim_source_file_push_address),
         Some(james_icon_draw_loop_address),
         Some(maria_icon_draw_loop_address),
         Some(weapon_assert_address),
@@ -650,9 +1007,14 @@ fn main(reason: u32) -> Result<()> {
         Some(animation_offset_func),
         Some(animation_read_func),
         Some(draw_message_func),
+        Some(hit_animation_func),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
+            &colt_anim_data,
+            &address_set_msg_data,
+            &demo_anim_data,
+            &anim_source_file_data,
             &JAMES_ICON_DRAW_LOOP,
             &MARIA_ICON_DRAW_LOOP,
             &MARIA_WEAPON_ASSERT,
@@ -662,6 +1024,7 @@ fn main(reason: u32) -> Result<()> {
             &ANIMATION_OFFSET_FUNC,
             &ANIMATION_READ_FUNC,
             &DRAW_MESSAGE_FUNC,
+            &HIT_ANIMATION_FUNC,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -669,8 +1032,13 @@ fn main(reason: u32) -> Result<()> {
         bail!("Failed to find code addresses");
     };
     log::debug!(
-        "Found tex ref data at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}",
+        "Found tex ref data at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
+        James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}",
         tex_ref_call_address as usize,
+        colt_anim_push_address as usize,
+        address_set_msg_push_address as usize,
+        demo_anim_push_address as usize,
+        anim_source_file_push_address as usize,
         james_icon_draw_loop_address as usize,
         maria_icon_draw_loop_address as usize,
         weapon_assert_address as usize,
@@ -680,12 +1048,48 @@ fn main(reason: u32) -> Result<()> {
         animation_offset_func as usize,
         animation_read_func as usize,
         draw_message_func as usize,
+        hit_animation_func as usize,
     );
 
     unsafe {
         // sanity checks
         let tex_ref_check_address = tex_ref_call_address.offset(-27);
         patch::assert_byte(tex_ref_check_address, 0x75)?; // jnz
+
+        let colt_anim_check_address = colt_anim_push_address.offset(5);
+        patch::assert_byte(colt_anim_check_address, 0xE8)?; // call
+
+        let character_files_check_address = colt_anim_push_address.offset(-217);
+        patch::assert_byte(character_files_check_address, 0xB8)?; // mov
+
+        let character_files_end_check_address = character_files_check_address.offset(14);
+        patch::assert_byte(character_files_end_check_address, 0x3D)?; // cmp
+
+        let address_set_msg_check_address = address_set_msg_push_address.offset(-12);
+        patch::assert_byte(address_set_msg_check_address, 0xE8)?; // call
+
+        let demo_anim_check_address = demo_anim_push_address.offset(27);
+        patch::assert_byte(demo_anim_check_address, 0xA1)?; // mov
+
+        let anim_frame_size_check_address = anim_source_file_push_address.offset(-256);
+        patch::assert_byte(anim_frame_size_check_address, 0xE8)?; // call
+
+        let request_file_size_address = patch::get_call_target(colt_anim_check_address) as usize;
+        let set_character_addresses_address = patch::get_call_target(address_set_msg_check_address) as usize;
+        let get_character_frame_size_address = patch::get_call_target(anim_frame_size_check_address) as usize;
+        // make sure the addresses look reasonable
+        let [true, true, true] = searcher.find_addresses_exec(&[request_file_size_address, set_character_addresses_address, get_character_frame_size_address], sh2pc)? else {
+            bail!("RequestFileSize() @ {:#08X}, SetCharacterAddresses() @ {:#08X}, and/or GetCharacterFrameSize @ {:#08X} don't look right", request_file_size_address, set_character_addresses_address, get_character_frame_size_address);
+        };
+
+        let get_character_buffers_call_address = (set_character_addresses_address + 0x13) as *const c_void;
+        patch::assert_byte(get_character_buffers_call_address, 0xE8)?; // call
+
+        let get_character_buffers_address = patch::get_call_target(get_character_buffers_call_address) as usize;
+        // make sure the addresses look reasonable
+        if !searcher.find_addresses_exec(&[get_character_buffers_address], sh2pc)?[0] {
+            bail!("GetCharacterBuffers() address {:#08X} doesn't look right", get_character_buffers_address);
+        };
 
         let maria_icon_func_address = maria_icon_draw_loop_address.offset(-16);
         patch::assert_byte(maria_icon_func_address, 0x83)?; // sub
@@ -730,13 +1134,23 @@ fn main(reason: u32) -> Result<()> {
         let maria_weapon_assert_address2 = weapon_assert_address2.offset(3);
         // no point asserting since this is still within our search string
 
-        // get pointer to equipped item ID
+        // hit reaction animations
+        let maria_hit_animation_check_address = hit_animation_func.offset(13);
+        patch::assert_byte(maria_hit_animation_check_address, 0xB8)?; // mov
+
+        // get pointer to equipped item ID and player character flag
         let equipped_item_id_address = std::ptr::read_unaligned(weapon_assert_address.offset(-43) as *const *mut u8);
-        // make sure the address looks reasonable
-        if !searcher.find_addresses(&[equipped_item_id_address as usize], Some(PAGE_READWRITE | PAGE_WRITECOPY), sh2pc)?[0] {
-            bail!("Equipped item ID address {:#08X} doesn't look right", equipped_item_id_address as usize);
-        }
-        GLOBAL.equipped_item_id = equipped_item_id_address;
+        let player_character_flag_address = std::ptr::read_unaligned(weapon_assert_address.offset(-75) as *const *const u8);
+        let character_files_address = std::ptr::read_unaligned(character_files_check_address.offset(1) as *const *mut game::CharacterFiles);
+        let character_files_end_address = std::ptr::read_unaligned(character_files_end_check_address.offset(1) as *const *mut game::CharacterFiles);
+        let maria_hit_animations_address = std::ptr::read_unaligned(maria_hit_animation_check_address.offset(1) as *const *mut game::AnimationDescription);
+        let player_ptr_address = std::ptr::read_unaligned(demo_anim_check_address.offset(1) as *const *mut *mut game::Character);
+        // make sure the addresses look reasonable
+        if !searcher.find_addresses_write(&[equipped_item_id_address as usize, player_character_flag_address as usize, character_files_address as usize, character_files_end_address as usize, maria_hit_animations_address as usize, player_ptr_address as usize], sh2pc)?.iter().all(|&a| a) {
+            bail!("One or more of the following addresses don't look right: equipped item ID address {:#08X}, player character flag address {:#08X}, character files address {:#08X}, character files end address {:#08X}, Maria hit animations address {:#08X}, player pointer address {:#08X}",
+                equipped_item_id_address as usize, player_character_flag_address as usize,character_files_address as usize, character_files_end_address as usize, maria_hit_animations_address as usize, player_ptr_address as usize,
+            );
+        };
 
         let james_animation_offset_address = animation_offset_func.offset(0x30);
         patch::assert_byte(james_animation_offset_address, 0xB8)?; // mov
@@ -786,7 +1200,9 @@ fn main(reason: u32) -> Result<()> {
         patch::assert_byte(draw_message_func, 0x8B)?; // mov
 
         // initialize static data
-        GLOBAL.init(&game::JAMES_SKELETON);
+        GLOBAL.init(&game::JAMES_SKELETON, equipped_item_id_address, player_character_flag_address, request_file_size_address,
+            get_character_buffers_address, character_files_address, character_files_end_address, maria_hit_animations_address,
+            player_ptr_address, get_character_frame_size_address)?;
         CONTROL_PANEL.set_draw_message_ptr(draw_message_func);
 
         let icon_coords_addr_bytes = (icon_coords_ptr as usize).to_le_bytes();
@@ -865,11 +1281,18 @@ fn main(reason: u32) -> Result<()> {
             &(game::NUM_ITEMS as u8).to_le_bytes(),
         )?;
 
+        // FIXME: skipping this for now; we should get a full understanding of how things work with
+        //  Maria, then circle back to James
         // increase memory for James' weapon animations
-        log::info!("Applying James animation patch at addresses {:#08X}, {:#08X}", james_anim_address1 as usize, james_anim_address2 as usize);
+        /*log::info!("Applying James animation patch at addresses {:#08X}, {:#08X}", james_anim_address1 as usize, james_anim_address2 as usize);
         let size_bytes = game::MARIA_ANIMATION_SIZE.to_le_bytes();
         patch::patch(james_anim_address1.offset(2), &size_bytes)?;
-        patch::patch(james_anim_address2.offset(2), &size_bytes)?;
+        patch::patch(james_anim_address2.offset(2), &size_bytes)?;*/
+
+        log::info!("Applying Maria animation buffer size patch at address {:#08X}", colt_anim_check_address as usize);
+        // patch Maria's animation buffer size calculation so we can make room for a James animation + Maria's hit reactions
+        let maria_animation_size_call = patch::call(colt_anim_check_address as usize, override_maria_animation_buffer_size as usize);
+        patch::patch(colt_anim_check_address, &maria_animation_size_call)?;
 
         // merge James and Maria's weapon lists into a single contiguous list
         log::info!("Merging weapon lists");
@@ -901,11 +1324,11 @@ fn main(reason: u32) -> Result<()> {
         // select correct animation offset based on equipped weapon
         log::info!("Patching animation offset logic at addresses {:#08X}, {:#08X}", james_animation_offset_address as usize, maria_animation_offset_address as usize);
 
-        patch::set_trampoline(&mut GLOBAL.james_anim_offset_thunk, 5, get_james_animation_offset as usize)?;
+        patch::set_trampoline(&mut GLOBAL.james_anim_offset_thunk, 5, get_frame_size as usize)?;
         let james_animation_offset_call = patch::call(james_animation_offset_address as usize, &raw const GLOBAL.james_anim_offset_thunk as usize);
         patch::patch(james_animation_offset_address, &james_animation_offset_call)?;
 
-        patch::set_trampoline(&mut GLOBAL.maria_anim_offset_thunk, 5, get_maria_animation_offset as usize)?;
+        patch::set_trampoline(&mut GLOBAL.maria_anim_offset_thunk, 5, get_frame_size as usize)?;
         let maria_animation_offset_call = patch::call(maria_animation_offset_address as usize, &raw const GLOBAL.maria_anim_offset_thunk as usize);
         patch::patch(maria_animation_offset_address, &maria_animation_offset_call)?;
 
@@ -933,6 +1356,20 @@ fn main(reason: u32) -> Result<()> {
         patch::set_trampoline(&mut GLOBAL.after_maria_anim_read_thunk, 12, anim_after_maria_return_address as usize)?;
         let anim_after_maria_read_jump = patch::jmp(anim_after_maria_read_address as usize, &raw const GLOBAL.after_maria_anim_read_thunk as usize);
         patch::patch(anim_after_maria_read_address, &anim_after_maria_read_jump)?;
+
+        log::info!("Patching animation buffer logic at addresses {:#08X}, {:#08X}", get_character_buffers_call_address as usize, get_character_frame_size_address);
+
+        // hook into the update of the player's animation buffer so we can fill in hit reactions and adjust offsets
+        let character_buffers_call = patch::call(get_character_buffers_call_address as usize, append_hit_reactions as usize);
+        patch::patch(get_character_buffers_call_address, &character_buffers_call)?;
+
+        // patch the call to get the animation frame size when a new animation is selected from the current animation
+        // file. we've already hooked this function, but the problem is that the animation description isn't set on
+        // the character until after the call, so we don't have the information to tell which part of the animation
+        // we're in. we'll hook this spot specifically to override the frame size.
+        patch::set_trampoline(&mut GLOBAL.anim_description_change_thunk, 7, hook_animation_description_change as usize)?;
+        let anim_description_frame_size_call = patch::call(anim_frame_size_check_address as usize, &raw const GLOBAL.anim_description_change_thunk as usize);
+        patch::patch(anim_frame_size_check_address, &anim_description_frame_size_call)?;
     }
 
     log::info!("All patches applied successfully");

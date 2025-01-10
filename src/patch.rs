@@ -5,10 +5,7 @@ use anyhow::{anyhow, Result};
 use memchr::memmem;
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{HMODULE, MAX_PATH};
-use windows::Win32::System::Memory::{
-    VirtualProtect, VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READWRITE,
-    PAGE_NOACCESS, PAGE_PROTECTION_FLAGS,
-};
+use windows::Win32::System::Memory::{VirtualProtect, VirtualQuery, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READWRITE, PAGE_WRITECOPY};
 use windows::Win32::System::ProcessStatus::{
     EnumProcessModules, GetModuleBaseNameW, GetModuleInformation, MODULEINFO,
 };
@@ -42,6 +39,12 @@ pub const fn jz(from: usize, to: usize) -> [u8; 6] {
     let bytes = addr_offset(from, to, 6);
     [0x0F, 0x84, bytes[0], bytes[1], bytes[2], bytes[3]]
 }
+
+pub const fn push(addr: usize) -> [u8; 5] {
+    let bytes = addr.to_le_bytes();
+    [0x68, bytes[0], bytes[1], bytes[2], bytes[3]]
+}
+
 
 // supports either call or jmp
 pub unsafe fn set_trampoline(trampoline: &mut [u8], call_offset: usize, to: usize) -> Result<()> {
@@ -276,5 +279,21 @@ impl ByteSearcher {
                 [&(0x1000 as *const c_void, usize::MAX as *const c_void)].into_iter(),
             )
         }
+    }
+
+    pub fn find_addresses_write<const N: usize, const M: usize>(
+        &self,
+        addresses: &[usize; N],
+        modules: &[&str; M],
+    ) -> Result<[bool; N]> {
+        self.find_addresses(addresses, Some(PAGE_READWRITE | PAGE_WRITECOPY), modules)
+    }
+
+    pub fn find_addresses_exec<const N: usize, const M: usize>(
+        &self,
+        addresses: &[usize; N],
+        modules: &[&str; M],
+    ) -> Result<[bool; N]> {
+        self.find_addresses(addresses, Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE), modules)
     }
 }
