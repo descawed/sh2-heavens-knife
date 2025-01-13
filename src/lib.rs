@@ -20,12 +20,15 @@ mod game;
 mod patch;
 mod input;
 
+use game::{Mat4, Vec3, Vec4};
+
 // search strings to find the areas we want to patch
 const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex\0";
 const COLT_ANIM_NAME: &CStr = c"data/chr2/mar/xmar_wpcolt.anm";
 const ADDRESS_SET_MSG: &[u8] = b"bg_chara.c:Cant't set character address.";
 const DEMO_ANIM_NAME: &[u8] = b"data/demo/jisatsu_a/bos.anm";
 const ANIM_SOURCE_FILE: &[u8] = b"\\projects\\sh2pc\\src\\Chacter\\m3_sc.c";
+const MODEL_MAGIC: u32 = 0xffff0003;
 const JAMES_ICON_DRAW_LOOP: [u8; 16] = [
     0x66, 0x8B, 0x50, 0x04, 0x66, 0x2B, 0x10, 0x83, 0xC0, 0x3C, 0x66, 0x89, 0x51, 0xFE, 0x66, 0x8B,
 ];
@@ -99,6 +102,8 @@ struct ControlPanel {
     max_copy_index: usize,
     message: game::Message,
     draw_message_ptr: Option<unsafe extern "C" fn(*const u8)>,
+    is_highlighting: bool,
+    do_dump_animation: bool,
 }
 
 impl ControlPanel {
@@ -113,6 +118,8 @@ impl ControlPanel {
             max_copy_index: game::MARIA_NUM_BONES - 1,
             message: game::Message::new(),
             draw_message_ptr: None,
+            is_highlighting: false,
+            do_dump_animation: false,
         }
     }
 
@@ -140,13 +147,27 @@ impl ControlPanel {
         self.print(std::ptr::null());
     }
 
+    pub const fn check_dump_animation(&mut self) -> bool {
+        if self.do_dump_animation {
+            self.do_dump_animation = false;
+            return true;
+        }
+        false
+    }
+
     pub const fn is_enabled(&self) -> bool {
         self.is_enabled
     }
 
-    pub const fn get_settings(&self) -> Option<(bool, usize, game::DebugField, usize)> {
+    pub const fn get_settings(&self) -> Option<(bool, usize, game::DebugField, usize, usize)> {
         if self.is_enabled {
-            Some((self.is_james, self.debug_bone_index, self.debug_field, self.max_copy_index))
+            Some((self.is_james, self.debug_bone_index, self.debug_field, self.max_copy_index,
+                  if self.is_highlighting {
+                      self.debug_bone_index
+                  } else {
+                      usize::MAX
+                  }
+            ))
         } else {
             None
         }
@@ -167,7 +188,7 @@ impl ControlPanel {
         }
     }
 
-    pub fn update_settings(&mut self) -> Option<(bool, usize, game::DebugField, usize)> {
+    pub fn update_settings(&mut self) -> Option<(bool, usize, game::DebugField, usize, usize)> {
         self.keyboard.update().expect("keyboard state update should not fail");
 
         if self.keyboard.is_key_down_once(VK_F7) {
@@ -225,6 +246,12 @@ impl ControlPanel {
                     self.debug_field = self.debug_field.prev();
                 }
             }
+        } else if self.keyboard.is_key_down_once(VK_H) {
+            self.is_highlighting = !self.is_highlighting;
+        } else if self.keyboard.is_key_down_once(VK_L) {
+            unsafe { GLOBAL.dump_standard_transforms() };
+        } else if self.keyboard.is_key_down_once(VK_K) {
+            self.do_dump_animation = true;
         }
 
         self.get_settings()
@@ -290,8 +317,46 @@ impl ControlPanel {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BoneDefaultTransforms {
+    pub rotation: Mat4,
+    pub translation: Vec3,
+    pub raw_transform: Mat4,
+}
+
+impl BoneDefaultTransforms {
+    pub const fn new() -> Self {
+        Self {
+            rotation: Mat4::new(
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+            ),
+            translation: Vec3::new(0.0, 0.0, 0.0),
+            raw_transform: Mat4::new(
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+            ),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.translation.norm() < 0.0001 && self.rotation.norm() < 0.0001
+    }
+}
+
+const HIGHLIGHT_SCALE: Mat4 = Mat4::new(
+    3.0, 0.0, 0.0, 0.0,
+    0.0, 3.0, 0.0, 0.0,
+    0.0, 0.0, 3.0, 0.0,
+    0.0, 0.0, 0.0, 1.0,
+);
+
 #[repr(C)]
-struct JamesAnimationContainer(pub [game::AnimationRecord; 41]);
+struct JamesAnimationContainer(pub [game::AnimationRecord; game::JAMES_NUM_BONES]);
 
 impl JamesAnimationContainer {
     const fn new() -> Self {
@@ -359,55 +424,60 @@ impl JamesAnimationContainer {
         }
     }
 
-    unsafe fn copy_to_maria(&self, mut maria_animation: *mut game::AnimationRecord) {
-        let max_copy_index = match CONTROL_PANEL.get_settings() {
-            Some((_, _, game::DebugField::None, max_copy_index)) => max_copy_index,
-            Some((is_james, bone_index, debug_field, max_copy_index)) => {
+    unsafe fn copy_to_maria(&self, animation: *mut game::Animation) {
+        let animation = animation.as_mut().expect("animation pointer should not be null");
+        if CONTROL_PANEL.check_dump_animation() {
+            animation.dump_transforms();
+        }
+
+        let (max_copy_index, highlight_bone, debug_text) = match CONTROL_PANEL.get_settings() {
+            Some((_, _, game::DebugField::None, max_copy_index, highlight_bone)) => (max_copy_index, highlight_bone, String::new()),
+            Some((is_james, bone_index, debug_field, max_copy_index, highlight_bone)) => {
                 let record = if is_james {
                     &self.0[bone_index]
                 } else {
-                    maria_animation.offset(bone_index as isize).as_ref().expect("animation pointer should not be null")
+                    animation.record(bone_index).expect("animation frames pointer should not be null")
                 };
 
-                let debug_text = record.get_debug_string(debug_field);
-                CONTROL_PANEL.display(&debug_text);
-
-                max_copy_index
+                (max_copy_index, highlight_bone, record.get_debug_string(debug_field))
             }
-            None => game::MARIA_NUM_BONES - 1,
+            None => (game::MARIA_NUM_BONES - 1, usize::MAX, String::new()),
         };
 
         for (maria_index, &james_index) in game::MARIA_TO_JAMES_SKELETON_MAP.iter().enumerate() {
+            let target_animation = animation.record_mut(maria_index).expect("animation frames pointer should not be null");
             if james_index < 0 || maria_index > max_copy_index {
-                let target_animation = maria_animation.as_mut().expect("animation pointer should not be null");
                 target_animation.copy_from_parent();
             } else {
-                self.0[james_index as usize].copy_to(maria_animation);
+                self.0[james_index as usize].copy_to(target_animation);
             }
 
-            maria_animation = maria_animation.offset(1);
+            if maria_index == highlight_bone {
+                // important note: the scaling effect on random body parts is very funny
+                target_animation.transform = (target_animation.transform.mat4() * HIGHLIGHT_SCALE).into();
+            }
         }
+
+        // fill in standard transforms for any bones we couldn't map
+        // we do this afterwards so that all the frames have been populated
+        let equipped_weapon = game::WeaponType::from_item_id(GLOBAL.equipped_item_id());
+        for (maria_index, &james_index) in game::MARIA_TO_JAMES_SKELETON_MAP.iter().enumerate() {
+            if james_index >= 0 {
+                continue;
+            }
+
+            let (Some(record), Some(transforms)) = (animation.record_mut(maria_index), GLOBAL.get_standard_transforms(maria_index)) else {
+                continue;
+            };
+
+            //record.transform = transforms.raw_transform.into();
+            record.set_transform_components_basic(&transforms.rotation, &transforms.translation);
+            animation.recalculate_bone_transform(maria_index, true, equipped_weapon);
+        }
+
+        CONTROL_PANEL.display(&debug_text);
     }
 }
-
-/*#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PlayerAnimationState {
-    Unknown,
-    MariaPlayingMaria,
-    MariaPlayingJames,
-    JamesPlayingMaria,
-    JamesPlayingJames,
-}
-
-impl PlayerAnimationState {
-    pub const fn is_normal(&self) -> bool {
-        matches!(self, Self::MariaPlayingMaria | Self::JamesPlayingJames)
-    }
-
-    pub const fn is_modded(&self) -> bool {
-        matches!(self, Self::MariaPlayingJames | Self::JamesPlayingMaria)
-    }
-}*/
 
 struct PersistentData {
     equipped_item_id: *mut u8,
@@ -430,6 +500,7 @@ struct PersistentData {
     character_files_end: *mut game::CharacterFiles,
     maria_hit_reaction_descriptions: *mut game::AnimationDescription,
     player_ptr: *mut *mut game::Character,
+    bone_standard_transforms: [BoneDefaultTransforms; game::JAMES_NUM_BONES],
 }
 
 impl PersistentData {
@@ -520,6 +591,7 @@ impl PersistentData {
             character_files_end: std::ptr::null_mut(),
             maria_hit_reaction_descriptions: std::ptr::null_mut(),
             player_ptr: std::ptr::null_mut(),
+            bone_standard_transforms: [const { BoneDefaultTransforms::new() }; game::JAMES_NUM_BONES],
         }
     }
 
@@ -557,6 +629,77 @@ impl PersistentData {
         Ok(())
     }
 
+    unsafe fn set_standard_transforms(&mut self, character: *mut game::Character) {
+        let Some(character) = character.as_ref() else {
+            log::warn!("Tried to read standard model transforms but character pointer was null");
+            return;
+        };
+
+        if !Self::is_player_id(character.id) {
+            return;
+        }
+
+        let model_data = character.model_buffer1;
+        if model_data.is_null() {
+            return; // nothing we can do
+        }
+
+        let model_words = model_data as *const u32;
+        let magic = *model_words;
+        if magic != MODEL_MAGIC {
+            log::warn!("Tried to read standard model transforms but model data pointer appears incorrect (expected magic number {:#08X}, got {:#08X})", MODEL_MAGIC, magic);
+            return;
+        }
+
+        let matrices_offset = *model_words.offset(2);
+        let matrices_ptr = model_data.offset(matrices_offset as isize) as *const game::D3DXMATRIX;
+        let skeleton = if self.is_player_maria() {
+            &game::MARIA_SKELETON[..]
+        } else {
+            &game::JAMES_SKELETON[..]
+        };
+        let matrices = std::slice::from_raw_parts(matrices_ptr, skeleton.len());
+
+        for (transform, (matrix, &parent_index)) in self.bone_standard_transforms.iter_mut().zip(matrices.iter().zip(skeleton)) {
+            let raw_transform = matrix.mat4();
+            let (rotation, translation) = matrix.split_transforms();
+
+            if parent_index < 0 {
+                transform.rotation = rotation;
+                transform.translation = translation;
+                transform.raw_transform = raw_transform;
+                continue;
+            }
+
+            let parent_transform = matrices[parent_index as usize].mat4();
+
+            let (relative_rotation, relative_translation) = game::get_split_transform(&parent_transform, &raw_transform);
+
+            // sanity check
+            /*let child_rotation = relative_rotation * parent_rotation;
+            let child_translation = relative_translation + parent_translation;
+            let child_transform = child_rotation.append_translation(&child_translation);
+            let diff = raw_transform - child_transform;
+            if diff.norm() > 0.1 {
+                log::error!("Failed to calculate relative transform for child of bone {}: correct {}, calculated {}. parent rot {}, parent trans {}, rel trans {}, inv parent rot {}, rel rot {}, recalc rot {}, recalc trans {}",
+                    parent_index, raw_transform, child_transform, parent_rotation, parent_translation, relative_translation, inverse_parent_rotation, relative_rotation, child_rotation, child_translation);
+            }*/
+
+            transform.rotation = relative_rotation;
+            transform.translation = relative_translation;
+            transform.raw_transform = raw_transform;
+        }
+    }
+
+    fn get_standard_transforms(&self, bone_index: usize) -> Option<&BoneDefaultTransforms> {
+        if bone_index >= self.bone_standard_transforms.len() {
+            return None;
+        }
+
+        let transform = &self.bone_standard_transforms[bone_index];
+        (!transform.is_empty()).then_some(transform)
+    }
+
     unsafe fn patch_animations_before_read(&mut self, animation1_ptr: *mut *mut game::AnimationRecord, animation2_ptr: *mut *mut game::AnimationRecord) {
         self.original_animation1 = *animation1_ptr;
         *animation1_ptr = &raw mut self.animation_temp1.0[0];
@@ -569,19 +712,25 @@ impl PersistentData {
         }
     }
 
-    unsafe fn patch_animations_after_read(&mut self, animation_ptr1: *mut *mut game::AnimationRecord, animation_ptr2: *mut *mut game::AnimationRecord) {
+    unsafe fn patch_animations_after_read(&mut self, animation_ptr1: *mut game::Animation, animation_ptr2: *mut game::Animation) {
         if self.original_animation1.is_null() || self.original_animation2.is_null() {
             return;
         }
 
-        self.animation_temp1.copy_to_maria(self.original_animation1);
-        if self.original_animation1 != self.original_animation2 {
-            self.animation_temp2.copy_to_maria(self.original_animation2);
+        if let Some(animation) = animation_ptr1.as_mut() {
+            animation.records = self.original_animation1;
+        }
+        if let Some(animation) = animation_ptr2.as_mut() {
+            animation.records = self.original_animation2;
         }
 
-        *animation_ptr1 = self.original_animation1;
+        self.animation_temp1.copy_to_maria(animation_ptr1);
+        if self.original_animation1 != self.original_animation2 {
+            self.animation_temp2.copy_to_maria(animation_ptr2);
+        }
+
+
         self.original_animation1 = std::ptr::null_mut();
-        *animation_ptr2 = self.original_animation2;
         self.original_animation2 = std::ptr::null_mut();
     }
 
@@ -695,17 +844,6 @@ impl PersistentData {
         }
     }
 
-    /*unsafe fn get_player_animation_state(&self) -> PlayerAnimationState {
-        let Some(files) = self.get_player_files().as_ref() else {
-            return PlayerAnimationState::Unknown;
-        };
-
-        match (self.is_player_maria(), files.is_using_james_animation(), files.is_using_maria_animation()) {
-            (true, false, _) => PlayerAnimationState::MariaPlayingMaria,
-
-        }
-    }*/
-
     unsafe fn is_james_animation_buffer(&self, animation_buffer: *mut u8) -> bool {
         self.get_character_files_by_animation_buffer(animation_buffer).as_ref().map(|buf| unsafe { buf.is_using_james_animation() }).unwrap_or(false)
     }
@@ -737,6 +875,19 @@ impl PersistentData {
             game::MARIA_ANIMATION_FRAME_SIZE
         } else {
             game::JAMES_ANIMATION_FRAME_SIZE
+        }
+    }
+
+    fn dump_standard_transforms(&self) {
+        let num_transforms = if unsafe { self.is_player_maria() } {
+            game::MARIA_NUM_BONES
+        } else {
+            game::JAMES_NUM_BONES
+        };
+
+        for i in 0..num_transforms {
+            let transform = &self.bone_standard_transforms[i];
+            log::debug!("Standard transform {}: rotation = {}, translation = {}, original = {}", i, transform.rotation, transform.translation, transform.raw_transform);
         }
     }
 
@@ -811,12 +962,23 @@ unsafe extern "C" fn patch_animations_before_read(character: *mut game::Characte
 unsafe extern "C" fn patch_animations_after_read_maria(character: *mut game::Character) {
     let character = character.as_mut().expect("character pointer should not be null");
 
+    if CONTROL_PANEL.check_dump_animation() {
+        character.animation1.dump_transforms();
+    }
+
     // we're not doing any mapping if we get here, but let's still update the control panel display
     let debug_text = match (character.id, CONTROL_PANEL.get_settings()) {
-        (_, Some((_, _, game::DebugField::None, _))) => String::new(),
-        (game::MARIA_ID, Some((false, bone_index, debug_field, _))) => {
-            let record = character.animation1.records.offset(bone_index as isize).as_ref().expect("animation pointer should not be null");
-            record.get_debug_string(debug_field)
+        (game::MARIA_ID, Some((false, bone_index, debug_field, _, highlight_bone))) => {
+            let record = character.animation1.records.offset(bone_index as isize).as_mut().expect("animation pointer should not be null");
+            if highlight_bone == bone_index {
+                record.transform = (record.transform.mat4() * HIGHLIGHT_SCALE).into();
+            }
+
+            if debug_field != game::DebugField::None {
+                record.get_debug_string(debug_field)
+            } else {
+                String::new()
+            }
         }
         _ => String::new(),
     };
@@ -834,7 +996,7 @@ unsafe extern "C" fn patch_animations_after_read(character: *mut game::Character
     }
 
     // update the original animations with the data from the temporary animations
-    GLOBAL.patch_animations_after_read(&raw mut character.animation1.records, &raw mut character.animation2.records);
+    GLOBAL.patch_animations_after_read(&raw mut character.animation1, &raw mut character.animation2);
 }
 
 unsafe extern "C" fn override_maria_animation_buffer_size(file: *mut game::FileInfo) -> usize {
@@ -894,15 +1056,20 @@ unsafe extern "C" fn append_hit_reactions(character_id: i32) -> *mut game::Chara
 }
 
 unsafe extern "C" fn hook_animation_description_change(_animation: *mut game::Animation, description: *mut game::AnimationDescription, character: *mut game::Character) -> usize {
-    let Some(character) = character.as_ref() else {
+    let Some(chara) = character.as_ref() else {
         log::warn!("Unexpected null character pointer when hooking animation description change");
         return 0;
     };
 
-    if PersistentData::is_player_id(character.id) {
+    if PersistentData::is_player_id(chara.id) {
+        // this is a decent place to check for any updates to the model data, as I would certainly expect
+        // a new animation to be set if the model changes. there might be more timely spots, though, if
+        // we decide to do some extra patching (e.g. SetCharacterAddresses)
+        GLOBAL.set_standard_transforms(character);
+
         GLOBAL.get_player_animation_frame_size_with_index(description.as_ref().map(|d| d.frame_index_start as usize))
     } else {
-        GLOBAL.get_character_frame_size(character.id as i32)
+        GLOBAL.get_character_frame_size(chara.id as i32)
     }
 }
 

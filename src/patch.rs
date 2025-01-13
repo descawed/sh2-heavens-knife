@@ -204,7 +204,7 @@ impl ByteSearcher {
         for &module in &modules[..num_modules] {
             let mut name_utf16 = [0; MAX_PATH as usize];
             let module_name = unsafe {
-                let num_chars = GetModuleBaseNameW(hproc, module, &mut name_utf16) as usize;
+                let num_chars = GetModuleBaseNameW(hproc, Some(module), &mut name_utf16) as usize;
                 if num_chars == 0 || num_chars >= name_utf16.len() {
                     continue;
                 }

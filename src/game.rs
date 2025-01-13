@@ -1,157 +1,18 @@
 use std::ffi::{c_void, CStr};
 
+use nalgebra::Unit;
+
 mod msg;
 pub use msg::*;
+
+mod d3d;
+pub use d3d::*;
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct IconCoords(pub u16, pub u16, pub u16); // x, y, edge
 
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct D3DXMATRIX {
-    pub _11: f32,
-    pub _12: f32,
-    pub _13: f32,
-    pub _14: f32,
-    pub _21: f32,
-    pub _22: f32,
-    pub _23: f32,
-    pub _24: f32,
-    pub _31: f32,
-    pub _32: f32,
-    pub _33: f32,
-    pub _34: f32,
-    pub _41: f32,
-    pub _42: f32,
-    pub _43: f32,
-    pub _44: f32,
-}
-
-impl D3DXMATRIX {
-    pub const fn new() -> Self {
-        Self {
-            _11: 0.0,
-            _12: 0.0,
-            _13: 0.0,
-            _14: 0.0,
-            _21: 0.0,
-            _22: 0.0,
-            _23: 0.0,
-            _24: 0.0,
-            _31: 0.0,
-            _32: 0.0,
-            _33: 0.0,
-            _34: 0.0,
-            _41: 0.0,
-            _42: 0.0,
-            _43: 0.0,
-            _44: 0.0,
-        }
-    }
-
-    pub const fn identity() -> Self {
-        Self {
-            _11: 1.0,
-            _12: 0.0,
-            _13: 0.0,
-            _14: 0.0,
-            _21: 0.0,
-            _22: 1.0,
-            _23: 0.0,
-            _24: 0.0,
-            _31: 0.0,
-            _32: 0.0,
-            _33: 1.0,
-            _34: 0.0,
-            _41: 0.0,
-            _42: 0.0,
-            _43: 0.0,
-            _44: 1.0,
-        }
-    }
-}
-
-impl Default for D3DXMATRIX {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for D3DXMATRIX {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]\n[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]\n[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]\n[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]",
-            self._11, self._12, self._13, self._14, self._21, self._22, self._23, self._24, self._31,
-            self._32, self._33, self._34, self._41, self._42, self._43, self._44
-        )
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct D3DXVECTOR4 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub w: f32,
-}
-
-impl D3DXVECTOR4 {
-    pub const fn new() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 0.0,
-        }
-    }
-}
-
-impl Default for D3DXVECTOR4 {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for D3DXVECTOR4 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:>10.4} {:>10.4} {:>10.4} {:>10.4}]", self.x, self.y, self.z, self.w)
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct D3DXVECTOR3 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl D3DXVECTOR3 {
-    pub const fn new() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }
-    }
-}
-
-impl Default for D3DXVECTOR3 {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for D3DXVECTOR3 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:>10.4} {:>10.4} {:>10.4}]", self.x, self.y, self.z)
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum DebugField {
     None,
     TransformMatrix,
@@ -255,6 +116,29 @@ impl AnimationRecord {
         }
     }
 
+    pub const fn is_root(&self) -> bool {
+        self.parent.is_null()
+    }
+
+    pub const fn parent(&self) -> Option<&AnimationRecord> {
+        unsafe { self.parent.as_ref() }
+    }
+
+    pub const fn next(&self) -> Option<&AnimationRecord> {
+        unsafe { self.next.as_ref() }
+    }
+
+    pub const fn next_mut(&self) -> Option<&mut AnimationRecord> {
+        unsafe { self.next.as_mut() }
+    }
+
+    pub fn len(&self) -> usize {
+        1 + match self.next() {
+            Some(next) => next.len(),
+            None => 0,
+        }
+    }
+
     pub const unsafe fn copy_to(&self, dest: *mut AnimationRecord) {
         // only want to copy the body, not the links
         let offset = std::mem::offset_of!(Self, transform);
@@ -267,41 +151,85 @@ impl AnimationRecord {
         std::ptr::copy_nonoverlapping(src, dest, size);
     }
 
-    pub const fn set_identity(&mut self) {
-        self.transform = D3DXMATRIX::identity();
-        self.translation_start = D3DXVECTOR4::new();
-        self.rotation_end = D3DXMATRIX::identity();
-        self.translation_end = D3DXVECTOR4::new();
-        self.rotation_axis = D3DXVECTOR4::new();
-        self.rotation_angle = 0.0;
-        self.rotation_axis_squared = D3DXVECTOR3::new();
-        self.rotation_axis_cross_terms = D3DXVECTOR4::new();
-    }
-
-    pub const fn set_zero(&mut self) {
-        self.transform = D3DXMATRIX::new();
-        self.translation_start = D3DXVECTOR4::new();
-        self.rotation_end = D3DXMATRIX::new();
-        self.translation_end = D3DXVECTOR4::new();
-        self.rotation_axis = D3DXVECTOR4::new();
-        self.rotation_angle = 0.0;
-        self.rotation_axis_squared = D3DXVECTOR3::new();
-        self.rotation_axis_cross_terms = D3DXVECTOR4::new();
-    }
-
     pub unsafe fn copy_from_parent(&mut self) {
-        if self.parent.is_null() {
+        let Some(parent) = self.parent.as_ref() else {
             return;
-        }
-
-        let parent = &mut *self.parent;
+        };
         self.transform = parent.transform.clone();
         self.rotation_end = parent.rotation_end.clone();
+        self.translation_start = parent.translation_start.clone();
         self.translation_end = parent.translation_end.clone();
         self.rotation_axis = parent.rotation_axis.clone();
         self.rotation_angle = parent.rotation_angle;
         self.rotation_axis_squared = parent.rotation_axis_squared.clone();
         self.rotation_axis_cross_terms = parent.rotation_axis_cross_terms.clone();
+    }
+
+    pub fn set_transform_components_basic(&mut self, rotation: &Mat4, translation: &Vec3) {
+        self.rotation_end = rotation.into();
+        self.translation_start = translation.insert_fixed_rows::<1>(3, 0.0).into();
+        self.translation_end = self.translation_start.clone();
+        self.rotation_angle = 0.0;
+        self.rotation_axis = D3DXVECTOR4 { x: 0.0, y: 0.0, z: 1.0, w: 0.0 };
+        self.rotation_axis_squared = D3DXVECTOR3 { x: 0.0, y: 0.0, z: 1.0 };
+        self.rotation_axis_cross_terms = D3DXVECTOR4::new();
+    }
+
+    pub fn recalculate_transform(&mut self, t: f32, additional_rotation: Mat4, use_sibling_translation_for_root: bool) {
+        let has_additional_rotation = !additional_rotation.is_identity(1e-6);
+
+        let static_rotation = self.rotation_end.mat4();
+
+        let rotation_axis = Unit::new_normalize(self.rotation_axis.vec3());
+        let rotation_angle = self.rotation_angle * t;
+        let dynamic_rotation = Mat4::from_axis_angle(&rotation_axis, rotation_angle);
+
+        let rotation = static_rotation * dynamic_rotation;
+
+        let translation_start = self.translation_start.vec3();
+        let translation_end = self.translation_end.vec3();
+        let translation = translation_start + (translation_end - translation_start) * t;
+
+        self.transform = match self.parent() {
+            Some(parent) => {
+                let parent_transform = parent.transform.mat4();
+
+                let mut final_transform = parent_transform * rotation;
+                if has_additional_rotation {
+                    final_transform = additional_rotation * final_transform;
+                }
+                final_transform.append_translation_mut(&parent_transform.transform_vector(&translation));
+
+                final_transform.into()
+            }
+            None => {
+                let mut final_transform = rotation;
+                if has_additional_rotation {
+                    final_transform = additional_rotation * final_transform;
+                }
+
+                if use_sibling_translation_for_root {
+                    if let Some(sibling) = self.next() {
+                        let sibling_transform = sibling.transform.mat4();
+                        final_transform.set_column(3, &sibling_transform.column(3));
+                    }
+                } else {
+                    final_transform.append_translation_mut(&translation);
+                }
+
+                final_transform.into()
+            }
+        };
+
+        // now we need to recalculate any children that were using the old transform
+        let this = &raw mut *self;
+        let mut next = self.next_mut();
+        while let Some(child) = next {
+            if child.parent == this {
+                child.recalculate_transform(t, additional_rotation, use_sibling_translation_for_root);
+            }
+            next = child.next_mut();
+        }
     }
 }
 
@@ -340,6 +268,49 @@ pub struct LoadedFile {
     pub file_info: *const FileInfo,
     pub buffer: *mut u8,
     pub size: usize,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeaponType {
+    None = 0,
+    Handgun = 1,
+    Shotgun = 2,
+    Rifle = 3,
+    HyperSpray = 4,
+    WoodenPlank = 5,
+    SteelPipe = 6,
+    Chainsaw = 7,
+    GreatKnife = 8,
+    Revolver = 9,
+    Cleaver = 10,
+}
+
+impl WeaponType {
+    pub const fn from_item_id(item_id: u8) -> Self {
+        match item_id {
+            4 => Self::Handgun,
+            6 => Self::Shotgun,
+            8 => Self::Rifle,
+            10 => Self::Revolver,
+            12 => Self::HyperSpray,
+            13 => Self::WoodenPlank,
+            14 => Self::SteelPipe,
+            15 => Self::GreatKnife,
+            16 => Self::Chainsaw,
+            17 => Self::Cleaver,
+            _ => Self::None,
+        }
+    }
+
+    pub const fn does_bone_animate(&self, bone_index: usize) -> bool {
+        match self {
+            Self::Handgun => bone_index == 27 || bone_index == 28, // shoulders
+            Self::Rifle => bone_index >= 8 && bone_index <= 10, // head/neck
+            Self::Revolver => bone_index == 21 || bone_index == 23, // shoulders
+            _ => false,
+        }
+    }
 }
 
 const JAMES_FILE_PATH: &[u8] = b"data/chr/jms/";
@@ -412,13 +383,13 @@ pub struct Animation {
     pub unk2a: i16,
     pub current_frame_index: u16,
     pub next_frame_index: u16,
-    pub unk30: u8,
+    pub unk30: u8, // think this flags whether this animation is for a weapon
     pub state: i8,
     pub unk32: u16,
     pub description1: *const AnimationDescription,
     pub description2: *const AnimationDescription,
-    pub rot_vec3c: D3DXVECTOR4,
-    pub rot_vec4c: D3DXVECTOR4,
+    pub look_rotation: D3DXVECTOR4,
+    pub equipped_weapon_rotation: D3DXVECTOR4,
     pub rot_vec5c: D3DXVECTOR4,
     pub rot_vec6c: D3DXVECTOR4,
     pub unk7c: f32,
@@ -427,6 +398,82 @@ pub struct Animation {
 impl Animation {
     pub const fn is_playing_hit_reaction(&self) -> bool {
         self.next_frame_index as usize >= WEAPON_ANIM_NUM_FRAMES
+    }
+
+    pub const fn frame_progress(&self) -> f32 {
+        (4096 - self.frame_steps_elapsed1) as f32 / 4096.0
+    }
+
+    pub fn root_rotation(&self) -> Mat4 {
+        Mat4::from_euler_angles(self.rot_vec5c.x, self.rot_vec5c.y + self.rot_vec6c.y, 0.0)
+    }
+
+    pub fn num_records(&self) -> usize {
+        self.record(0).map(AnimationRecord::len).unwrap_or(0)
+    }
+
+    pub fn recalculate_bone_transform(&mut self, bone_index: usize, is_james: bool, equipped_weapon: WeaponType) {
+        let record = unsafe { self.records.offset(bone_index as isize).as_mut() }.unwrap();
+
+        let mut additional_rotation = Mat4::identity();
+        let mut use_sibling_translation = false;
+
+        if record.is_root() {
+            // there's additional animation calculation behavior associated with this condition that we
+            // don't handle, because, as far as I can tell, unk30 is never set for players. but we will
+            // at least check for it and warn.
+            if self.unk30 == 1 {
+                log::warn!("Ignoring unk30 flag for root animation record {}", bone_index);
+            }
+
+            if bone_index == 0 {
+                additional_rotation = self.root_rotation() * additional_rotation;
+                use_sibling_translation = true;
+            }
+        } else {
+            // apply look rotation if this is the appropriate head/neck bone
+            if (is_james && bone_index == 8) || (!is_james && bone_index == 6) {
+                additional_rotation = self.look_rotation.rotation_matrix() * additional_rotation;
+            }
+
+            // apply equipped weapon rotation as appropriate
+            // FIXME: this assumes that we don't need to check the player character because each
+            //  weapon is associated with only a single animation, but that won't be true if I
+            //  patch the revolver/handgun animations
+            if equipped_weapon.does_bone_animate(bone_index) {
+                additional_rotation = self.equipped_weapon_rotation.rotation_matrix() * additional_rotation;
+            }
+        }
+
+        record.recalculate_transform(self.frame_progress(), additional_rotation, use_sibling_translation);
+    }
+
+    pub const fn record(&self, bone_index: usize) -> Option<&AnimationRecord> {
+        unsafe { self.records.offset(bone_index as isize).as_ref() }
+    }
+
+    pub const fn record_mut(&self, bone_index: usize) -> Option<&mut AnimationRecord> {
+        unsafe { self.records.offset(bone_index as isize).as_mut() }
+    }
+
+    pub fn dump_transforms(&self) {
+        for i in 0..self.num_records() {
+            let record = self.record(i).unwrap();
+            match record.parent() {
+                Some(parent) => {
+                    let parent_transform = parent.transform.mat4();
+                    let this_transform = record.transform.mat4();
+
+                    let rel_mat = get_transform(&parent_transform, &this_transform);
+                    let (rel_rot, rel_trans) = get_split_transform(&parent_transform, &this_transform);
+
+                    log::debug!("Bone {}: transform = {}, parent transform = {}, relative transform = {}, relative rotation = {}, relative translation = {}", i, this_transform, parent_transform, rel_mat, rel_rot, rel_trans);
+                }
+                None => {
+                    log::debug!("Root bone {}: transform = {}", i, record.transform.mat4());
+                }
+            }
+        }
     }
 }
 
@@ -554,8 +601,7 @@ pub const JAMES_SKELETON: [i8; 41] = [
 
 pub const JAMES_NUM_BONES: usize = JAMES_SKELETON.len();
 
-// this is a handy reference even if it's not actively used right now
-/*pub const MARIA_SKELETON: [i8; 36] = [
+pub const MARIA_SKELETON: [i8; 36] = [
     -1,
     -1,
     0,
@@ -592,7 +638,7 @@ pub const JAMES_NUM_BONES: usize = JAMES_SKELETON.len();
     29,
     30,
     32,
-];*/
+];
 
 // value = James, index = Maria
 pub const MARIA_TO_JAMES_SKELETON_MAP: [isize; 36] = [
