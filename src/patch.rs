@@ -11,10 +11,18 @@ use windows::Win32::System::ProcessStatus::{
 };
 use windows::Win32::System::Threading::GetCurrentProcess;
 
+pub const unsafe fn get_absolute_target(ptr: *const c_void, instruction_size: isize) -> *const c_void {
+    let original_jump_offset = std::ptr::read_unaligned(ptr.offset(instruction_size - 4) as *const isize) + instruction_size;
+    ptr.offset(original_jump_offset)
+}
+
 // works with both call and non-short jump
 pub const unsafe fn get_call_target(ptr: *const c_void) -> *const c_void {
-    let original_jump_offset = std::ptr::read_unaligned(ptr.offset(1) as *const isize) + 5; // +5 for instruction size
-    ptr.offset(original_jump_offset)
+    get_absolute_target(ptr, 5)
+}
+
+pub const unsafe fn get_conditional_jump_target(ptr: *const c_void) -> *const c_void {
+    get_absolute_target(ptr, 6)
 }
 
 pub const fn addr_offset(
@@ -51,6 +59,13 @@ pub unsafe fn set_trampoline(trampoline: &mut [u8], call_offset: usize, to: usiz
     let ptr = trampoline.as_ptr();
     let asm = addr_offset(ptr.offset(call_offset as isize) as usize, to, 5);
     trampoline[call_offset + 1..call_offset + 1 + asm.len()].copy_from_slice(&asm);
+    unprotect(ptr as *const c_void, trampoline.len()).map(|_| ())
+}
+
+pub unsafe fn set_trampoline_conditional(trampoline: &mut [u8], call_offset: usize, to: usize) -> Result<()> {
+    let ptr = trampoline.as_ptr();
+    let asm = addr_offset(ptr.offset(call_offset as isize) as usize, to, 6);
+    trampoline[call_offset + 2..call_offset + 2 + asm.len()].copy_from_slice(&asm);
     unprotect(ptr as *const c_void, trampoline.len()).map(|_| ())
 }
 

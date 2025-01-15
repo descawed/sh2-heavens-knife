@@ -62,6 +62,18 @@ const DRAW_MESSAGE_FUNC: [u8; 9] = [
 const HIT_ANIMATION_FUNC: [u8; 11] = [
     0x0E, 0x01, 0x56, 0x75, 0x44, 0x81, 0xFF, 0x21, 0x4E, 0x00, 0x00,
 ];
+const JAMES_ACTION_SOUNDS: [u8; 6] = [
+    0xFE, 0x83, 0xF8, 0x1B, 0x0F, 0x87,
+];
+const MARIA_ACTION_SOUNDS: [u8; 7] = [
+    0x0C, 0x8D, 0x41, 0xFD, 0x83, 0xF8, 0x1A,
+];
+const GRUNT_SOUND_CALL: [u8; 5] = [
+    0x1F, 0x2B, 0x00, 0x00, 0xE8,
+];
+const SOUND_PARAMETER_SELECT: [u8; 6] = [
+    0x83, 0xE8, 0x06, 0x74, 0x15, 0x48,
+];
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ControlSelection {
@@ -248,8 +260,6 @@ impl ControlPanel {
             }
         } else if self.keyboard.is_key_down_once(VK_H) {
             self.is_highlighting = !self.is_highlighting;
-        } else if self.keyboard.is_key_down_once(VK_L) {
-            unsafe { GLOBAL.dump_standard_transforms() };
         } else if self.keyboard.is_key_down_once(VK_K) {
             self.do_dump_animation = true;
         }
@@ -317,194 +327,52 @@ impl ControlPanel {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct BoneDefaultTransforms {
-    pub rotation: Mat4,
-    pub translation: Vec3,
-    pub raw_transform: Mat4,
-}
-
-impl BoneDefaultTransforms {
-    pub const fn new() -> Self {
-        Self {
-            rotation: Mat4::new(
-                0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0,
-            ),
-            translation: Vec3::new(0.0, 0.0, 0.0),
-            raw_transform: Mat4::new(
-                0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0,
-            ),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.translation.norm() < 0.0001 && self.rotation.norm() < 0.0001
-    }
-}
-
-const HIGHLIGHT_SCALE: Mat4 = Mat4::new(
-    3.0, 0.0, 0.0, 0.0,
-    0.0, 3.0, 0.0, 0.0,
-    0.0, 0.0, 3.0, 0.0,
-    0.0, 0.0, 0.0, 1.0,
-);
-
-#[repr(C)]
-struct JamesAnimationContainer(pub [game::AnimationRecord; game::JAMES_NUM_BONES]);
-
-impl JamesAnimationContainer {
-    const fn new() -> Self {
-        Self([
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-            game::AnimationRecord::new(),
-        ])
-    }
-
-    fn init(&mut self, skeleton: &[i8]) {
-        for i in 0..self.0.len() {
-            let next_index = i + 1;
-            if next_index < self.0.len() {
-                self.0[i].next = &raw mut self.0[next_index];
-            } else {
-                self.0[i].next = std::ptr::null_mut();
-            }
-
-            let parent_index = skeleton[i];
-            if parent_index >= 0 {
-                let parent_index = parent_index as usize;
-                self.0[i].parent = &raw mut self.0[parent_index];
-            } else {
-                self.0[i].parent = std::ptr::null_mut();
-            }
-        }
-    }
-
-    unsafe fn copy_to_maria(&self, animation: *mut game::Animation) {
-        let animation = animation.as_mut().expect("animation pointer should not be null");
-        if CONTROL_PANEL.check_dump_animation() {
-            animation.dump_transforms();
-        }
-
-        let (max_copy_index, highlight_bone, debug_text) = match CONTROL_PANEL.get_settings() {
-            Some((_, _, game::DebugField::None, max_copy_index, highlight_bone)) => (max_copy_index, highlight_bone, String::new()),
-            Some((is_james, bone_index, debug_field, max_copy_index, highlight_bone)) => {
-                let record = if is_james {
-                    &self.0[bone_index]
-                } else {
-                    animation.record(bone_index).expect("animation frames pointer should not be null")
-                };
-
-                (max_copy_index, highlight_bone, record.get_debug_string(debug_field))
-            }
-            None => (game::MARIA_NUM_BONES - 1, usize::MAX, String::new()),
-        };
-
-        for (maria_index, &james_index) in game::MARIA_TO_JAMES_SKELETON_MAP.iter().enumerate() {
-            let target_animation = animation.record_mut(maria_index).expect("animation frames pointer should not be null");
-            if james_index < 0 || maria_index > max_copy_index {
-                target_animation.copy_from_parent();
-            } else {
-                self.0[james_index as usize].copy_to(target_animation);
-            }
-
-            if maria_index == highlight_bone {
-                // important note: the scaling effect on random body parts is very funny
-                target_animation.transform = (target_animation.transform.mat4() * HIGHLIGHT_SCALE).into();
-            }
-        }
-
-        // fill in standard transforms for any bones we couldn't map
-        // we do this afterwards so that all the frames have been populated
-        let equipped_weapon = game::WeaponType::from_item_id(GLOBAL.equipped_item_id());
-        for (maria_index, &james_index) in game::MARIA_TO_JAMES_SKELETON_MAP.iter().enumerate() {
-            if james_index >= 0 {
-                continue;
-            }
-
-            let (Some(record), Some(transforms)) = (animation.record_mut(maria_index), GLOBAL.get_standard_transforms(maria_index)) else {
-                continue;
-            };
-
-            //record.transform = transforms.raw_transform.into();
-            record.set_transform_components_basic(&transforms.rotation, &transforms.translation);
-            animation.recalculate_bone_transform(maria_index, true, equipped_weapon);
-        }
-
-        CONTROL_PANEL.display(&debug_text);
-    }
+#[derive(Debug)]
+struct WeaponAnimationFiles {
+    handgun: game::FileInfo,
+    shotgun: game::FileInfo,
+    rifle: game::FileInfo,
+    hyper_spray: game::FileInfo,
+    wooden_plank: game::FileInfo,
+    steel_pipe: game::FileInfo,
+    chainsaw: game::FileInfo,
+    great_knife: game::FileInfo,
+    revolver: game::FileInfo,
+    cleaver: game::FileInfo,
 }
 
 struct PersistentData {
-    equipped_item_id: *mut u8,
+    equipped_item_id: *mut i8,
     pub james_anim_offset_thunk: [u8; 16],
     pub maria_anim_offset_thunk: [u8; 16],
     pub anim_read_thunk: [u8; 21],
     pub after_anim_read_thunk: [u8; 14],
     pub after_maria_anim_read_thunk: [u8; 17],
     pub anim_description_change_thunk: [u8; 16],
-    pub animation_temp1: JamesAnimationContainer,
-    pub animation_temp2: JamesAnimationContainer,
+    pub load_weapon_thunk: [u8; 12],
+    pub load_weapon_thunk2: [u8; 12],
+    pub james_action_sound_thunk: [u8; 63],
+    pub maria_action_sound_thunk: [u8; 63],
     pub original_animation1: *mut game::AnimationRecord,
     pub original_animation2: *mut game::AnimationRecord,
     player_character_flag: *const u8,
     request_file_size: Option<unsafe extern "C" fn(file: *const game::FileInfo) -> usize>,
     get_character_buffers: Option<unsafe extern "C" fn(character_id: i32) -> *mut game::CharacterBuffers>,
     get_character_frame_size: Option<unsafe extern "C" fn(character_id: i32) -> usize>,
-    maria_hit_reactions: [u8; game::MARIA_HIT_REACTIONS_ANIM_SIZE],
     character_files: *mut game::CharacterFiles,
     character_files_end: *mut game::CharacterFiles,
-    maria_hit_reaction_descriptions: *mut game::AnimationDescription,
     player_ptr: *mut *mut game::Character,
-    bone_standard_transforms: [BoneDefaultTransforms; game::JAMES_NUM_BONES],
+    james_weapon_animations: WeaponAnimationFiles,
+    maria_weapon_animations: WeaponAnimationFiles,
+    weapon_info: *mut game::WeaponInfo,
+    unk_grunt_sound_value: Option<unsafe extern "C" fn() -> i32>,
+    sound_param_data: *mut u8,
 }
 
 impl PersistentData {
     const fn new() -> Self {
+        use game::FileInfo;
+
         Self {
             equipped_item_id: std::ptr::null_mut(),
             james_anim_offset_thunk: [
@@ -578,28 +446,116 @@ impl PersistentData {
                 0x5A, // pop edx
                 0xC3, // ret
             ],
-            animation_temp1: JamesAnimationContainer::new(),
-            animation_temp2: JamesAnimationContainer::new(),
+            load_weapon_thunk: [
+                0x60, // pushad
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x61, // popad
+                0xE9, 0, 0, 0, 0, // jmp <return>
+            ],
+            load_weapon_thunk2: [
+                0x60, // pushad
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x61, // popad
+                0xE9, 0, 0, 0, 0, // jmp <return>
+            ],
+            james_action_sound_thunk: [
+                0x0F, 0x87, 0, 0, 0, 0, // ja <default>
+                0x60, // pushad ; from edi, the last register pushed, we'll get the animation description
+                0x83, 0xC0, 0x03, // add eax, 3 ; prior code subtracts 3 from the animation ID
+                0x50, // push eax
+                0x8D, 0x44, 0x24, 0x38, // lea eax, [esp+56]
+                0x50, // push eax ; sound parameters
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x83, 0xC4, 0x08, // add esp, 8
+                0x85, 0xC0, // test eax, eax
+                0x74, 0x1D, // jnz no_match
+                0x5F, // pop edi
+                0x5E, // pop esi
+                0x5D, // pop ebp
+                0x83, 0xC4, 0x04, // add esp, 4 ; skip esp
+                0x5B, // pop ebx
+                0x5A, // pop edx
+                0x89, 0xC1, // mov ecx, eax
+                0x25, 0xFF, 0xFF, 0x00, 0x00, // and eax, 0xFFFF
+                0x89, 0xC6, // mov esi, eax
+                0xC1, 0xE9, 0x10, // shr ecx, 16
+                0x89, 0xCD, // mov ebp, ecx
+                0x59, // pop ecx
+                0x58, // pop eax
+                0xE9, 0, 0, 0, 0, // jmp <play_sound>
+                0x61, // no_match: popad
+                0xE9, 0, 0, 0, 0, // jmp <original>
+            ],
+            maria_action_sound_thunk: [
+                0x0F, 0x87, 0, 0, 0, 0, // ja <default>
+                0x60, // pushad ; from edi, the last register pushed, we'll get the animation description
+                0x83, 0xC0, 0x03, // add eax, 3 ; prior code subtracts 3 from the animation ID
+                0x50, // push eax
+                0x8D, 0x44, 0x24, 0x34, // lea eax, [esp+52]
+                0x50, // push eax ; sound parameters
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x83, 0xC4, 0x08, // add esp, 8
+                0x85, 0xC0, // test eax, eax
+                0x74, 0x1D, // jnz no_match
+                0x5F, // pop edi
+                0x5E, // pop esi
+                0x5D, // pop ebp
+                0x83, 0xC4, 0x04, // add esp, 4 ; skip esp
+                0x5B, // pop ebx
+                0x5A, // pop edx
+                0x89, 0xC1, // mov ecx, eax
+                0x25, 0xFF, 0xFF, 0x00, 0x00, // and eax, 0xFFFF
+                0x89, 0xC6, // mov esi, eax
+                0xC1, 0xE9, 0x10, // shr ecx, 16
+                0x89, 0xCD, // mov ebp, ecx
+                0x59, // pop ecx
+                0x58, // pop eax
+                0xE9, 0, 0, 0, 0, // jmp <play_sound>
+                0x61, // no_match: popad
+                0xE9, 0, 0, 0, 0, // jmp <original>
+            ],
             original_animation1: std::ptr::null_mut(),
             original_animation2: std::ptr::null_mut(),
             player_character_flag: std::ptr::null(),
             request_file_size: None,
             get_character_buffers: None,
             get_character_frame_size: None,
-            maria_hit_reactions: [0; game::MARIA_HIT_REACTIONS_ANIM_SIZE],
             character_files: std::ptr::null_mut(),
             character_files_end: std::ptr::null_mut(),
-            maria_hit_reaction_descriptions: std::ptr::null_mut(),
             player_ptr: std::ptr::null_mut(),
-            bone_standard_transforms: [const { BoneDefaultTransforms::new() }; game::JAMES_NUM_BONES],
+            james_weapon_animations: WeaponAnimationFiles {
+                handgun: FileInfo::new(c"data/chr/jms/jms_wphand.anm"),
+                shotgun: FileInfo::new(c"data/chr/jms/jms_wpshot.anm"),
+                rifle: FileInfo::new(c"data/chr/jms/jms_wprifl.anm"),
+                hyper_spray: FileInfo::new(c"data/chr/jms/jms_wpsp.anm"),
+                wooden_plank: FileInfo::new(c"data/chr/jms/jms_wpkaku.anm"),
+                steel_pipe: FileInfo::new(c"data/chr/jms/jms_wppipe.anm"),
+                chainsaw: FileInfo::new(c"data/chr/jms/jms_wpcsaw.anm"),
+                great_knife: FileInfo::new(c"data/chr/jms/jms_wpnata.anm"),
+                revolver: FileInfo::new(c"data/chr/jms/jms_wpcolt.anm"),
+                cleaver: FileInfo::new(c"data/chr/jms/jms_wpknif.anm"),
+            },
+            maria_weapon_animations: WeaponAnimationFiles {
+                handgun: FileInfo::new(c"data/chr2/mar/xmar_wphand.anm"),
+                shotgun: FileInfo::new(c"data/chr2/mar/xmar_wpshot.anm"),
+                rifle: FileInfo::new(c"data/chr2/mar/xmar_wprifl.anm"),
+                hyper_spray: FileInfo::new(c"data/chr2/mar/xmar_wpsp.anm"),
+                wooden_plank: FileInfo::new(c"data/chr2/mar/xmar_wpkaku.anm"),
+                steel_pipe: FileInfo::new(c"data/chr2/mar/xmar_wppipe.anm"),
+                chainsaw: FileInfo::new(c"data/chr2/mar/xmar_wpcsaw.anm"),
+                great_knife: FileInfo::new(c"data/chr2/mar/xmar_wpnata.anm"),
+                revolver: FileInfo::new(c"data/chr2/mar/xmar_wpcolt.anm"),
+                cleaver: FileInfo::new(c"data/chr2/mar/xmar_wpknif.anm"),
+            },
+            weapon_info: std::ptr::null_mut(),
+            unk_grunt_sound_value: None,
+            sound_param_data: std::ptr::null_mut(),
         }
     }
 
-    fn init(&mut self, skeleton: &[i8], equipped_item_id: *mut u8, player_character_flag: *const u8, request_file_size: usize, get_character_buffers: usize,
-        character_files: *mut game::CharacterFiles, character_files_end: *mut game::CharacterFiles, maria_hit_reactions_descriptions: *mut game::AnimationDescription,
-        player_ptr: *mut *mut game::Character, get_character_frame_size: usize) -> Result<()> {
-        self.animation_temp1.init(skeleton);
-        self.animation_temp2.init(skeleton);
+    fn init(&mut self, equipped_item_id: *mut i8, player_character_flag: *const u8, request_file_size: usize, get_character_buffers: usize,
+        character_files: *mut game::CharacterFiles, character_files_end: *mut game::CharacterFiles, player_ptr: *mut *mut game::Character,
+            get_character_frame_size: usize, weapon_info: *mut game::WeaponInfo, grunt_sound_selector: usize, sound_param_data: *mut u8) {
         self.equipped_item_id = equipped_item_id;
         self.player_character_flag = player_character_flag;
         self.request_file_size = Some(unsafe { std::mem::transmute(request_file_size) });
@@ -607,138 +563,52 @@ impl PersistentData {
         self.get_character_frame_size = Some(unsafe { std::mem::transmute(get_character_frame_size) });
         self.character_files = character_files;
         self.character_files_end = character_files_end;
-        self.maria_hit_reaction_descriptions = maria_hit_reactions_descriptions;
         self.player_ptr = player_ptr;
-        self.load_maria_hit_reactions()
+        self.weapon_info = weapon_info;
+        self.unk_grunt_sound_value = Some(unsafe { std::mem::transmute(grunt_sound_selector) });
+        self.sound_param_data = sound_param_data;
     }
 
-    fn load_maria_hit_reactions(&mut self) -> Result<()> {
-        // TODO: can we always assume the cwd is the game dir?
-        let maria_anim_path = Path::new(COLT_ANIM_NAME.to_str()?);
-        let mut file = File::open(maria_anim_path)?;
-        // FIXME: this should technically read in a loop
-        let bytes_read = file.seek_read(&mut self.maria_hit_reactions, game::MARIA_ANIM_HIT_REACTIONS_START_OFFSET as u64)?;
-        if bytes_read != self.maria_hit_reactions.len() {
-            bail!("Failed to read expected amount of data from Maria animation {}: read {} out of {} bytes", maria_anim_path.display(), bytes_read, self.maria_hit_reactions.len());
-        }
-        let file_size = file.seek(SeekFrom::End(0))?;
-        if file_size != game::MARIA_WEAPON_ANIM_SIZE as u64 {
-            bail!("Unexpected file size for Maria animation: {}", maria_anim_path.display());
-        }
-
-        Ok(())
-    }
-
-    unsafe fn set_standard_transforms(&mut self, character: *mut game::Character) {
-        let Some(character) = character.as_ref() else {
-            log::warn!("Tried to read standard model transforms but character pointer was null");
-            return;
+    unsafe fn set_weapon_animations(&mut self) {
+        log::debug!("Weapon animation address: {:#08X}", self.weapon_info as usize);
+        let weapon_info = std::slice::from_raw_parts_mut(self.weapon_info, game::NUM_WEAPON_INFOS);
+        let is_player_maria = self.is_player_maria();
+        let animations = if is_player_maria {
+            &mut self.maria_weapon_animations
+        } else {
+            &mut self.james_weapon_animations
         };
 
-        if !Self::is_player_id(character.id) {
-            return;
-        }
+        // skip James' no-weapon animation
+        // special handling for handgun
+        weapon_info[2].animation = &raw mut animations.shotgun;
+        weapon_info[3].animation = &raw mut animations.rifle;
+        weapon_info[4].animation = &raw mut animations.hyper_spray;
+        weapon_info[5].animation = &raw mut animations.wooden_plank;
+        weapon_info[6].animation = &raw mut animations.steel_pipe;
+        weapon_info[7].animation = &raw mut animations.chainsaw;
+        weapon_info[8].animation = &raw mut animations.great_knife;
+        // normally index 9 is the end of James' weapons, but we copied the cleaver here to unify
+        // the weapon lists
+        weapon_info[9].animation = &raw mut animations.cleaver;
+        // skip Maria's no-weapon animation
+        // special handling for revolver
 
-        let model_data = character.model_buffer1;
-        if model_data.is_null() {
-            return; // nothing we can do
-        }
-
-        let model_words = model_data as *const u32;
-        let magic = *model_words;
-        if magic != MODEL_MAGIC {
-            log::warn!("Tried to read standard model transforms but model data pointer appears incorrect (expected magic number {:#08X}, got {:#08X})", MODEL_MAGIC, magic);
-            return;
-        }
-
-        let matrices_offset = *model_words.offset(2);
-        let matrices_ptr = model_data.offset(matrices_offset as isize) as *const game::D3DXMATRIX;
-        let skeleton = if self.is_player_maria() {
-            &game::MARIA_SKELETON[..]
+        // special handling for the handguns - use the character's own handgun animation for both
+        if is_player_maria {
+            weapon_info[1].animation = &raw mut animations.revolver;
+            weapon_info[11].animation = &raw mut animations.revolver;
         } else {
-            &game::JAMES_SKELETON[..]
-        };
-        let matrices = std::slice::from_raw_parts(matrices_ptr, skeleton.len());
-
-        for (transform, (matrix, &parent_index)) in self.bone_standard_transforms.iter_mut().zip(matrices.iter().zip(skeleton)) {
-            let raw_transform = matrix.mat4();
-            let (rotation, translation) = matrix.split_transforms();
-
-            if parent_index < 0 {
-                transform.rotation = rotation;
-                transform.translation = translation;
-                transform.raw_transform = raw_transform;
-                continue;
-            }
-
-            let parent_transform = matrices[parent_index as usize].mat4();
-
-            let (relative_rotation, relative_translation) = game::get_split_transform(&parent_transform, &raw_transform);
-
-            // sanity check
-            /*let child_rotation = relative_rotation * parent_rotation;
-            let child_translation = relative_translation + parent_translation;
-            let child_transform = child_rotation.append_translation(&child_translation);
-            let diff = raw_transform - child_transform;
-            if diff.norm() > 0.1 {
-                log::error!("Failed to calculate relative transform for child of bone {}: correct {}, calculated {}. parent rot {}, parent trans {}, rel trans {}, inv parent rot {}, rel rot {}, recalc rot {}, recalc trans {}",
-                    parent_index, raw_transform, child_transform, parent_rotation, parent_translation, relative_translation, inverse_parent_rotation, relative_rotation, child_rotation, child_translation);
-            }*/
-
-            transform.rotation = relative_rotation;
-            transform.translation = relative_translation;
-            transform.raw_transform = raw_transform;
+            weapon_info[1].animation = &raw mut animations.handgun;
+            weapon_info[11].animation = &raw mut animations.handgun;
         }
-    }
-
-    fn get_standard_transforms(&self, bone_index: usize) -> Option<&BoneDefaultTransforms> {
-        if bone_index >= self.bone_standard_transforms.len() {
-            return None;
-        }
-
-        let transform = &self.bone_standard_transforms[bone_index];
-        (!transform.is_empty()).then_some(transform)
-    }
-
-    unsafe fn patch_animations_before_read(&mut self, animation1_ptr: *mut *mut game::AnimationRecord, animation2_ptr: *mut *mut game::AnimationRecord) {
-        self.original_animation1 = *animation1_ptr;
-        *animation1_ptr = &raw mut self.animation_temp1.0[0];
-        self.original_animation2 = *animation2_ptr;
-        // the animations can be (are always?) the same, so handle that case
-        if self.original_animation1 == self.original_animation2 {
-            *animation2_ptr = &raw mut self.animation_temp1.0[0];
-        } else {
-            *animation2_ptr = &raw mut self.animation_temp2.0[0];
-        }
-    }
-
-    unsafe fn patch_animations_after_read(&mut self, animation_ptr1: *mut game::Animation, animation_ptr2: *mut game::Animation) {
-        if self.original_animation1.is_null() || self.original_animation2.is_null() {
-            return;
-        }
-
-        if let Some(animation) = animation_ptr1.as_mut() {
-            animation.records = self.original_animation1;
-        }
-        if let Some(animation) = animation_ptr2.as_mut() {
-            animation.records = self.original_animation2;
-        }
-
-        self.animation_temp1.copy_to_maria(animation_ptr1);
-        if self.original_animation1 != self.original_animation2 {
-            self.animation_temp2.copy_to_maria(animation_ptr2);
-        }
-
-
-        self.original_animation1 = std::ptr::null_mut();
-        self.original_animation2 = std::ptr::null_mut();
     }
 
     const unsafe fn is_player_maria(&self) -> bool {
         *self.player_character_flag == 1
     }
 
-    const unsafe fn equipped_item_id(&self) -> u8 {
+    const unsafe fn equipped_item_id(&self) -> i8 {
         *self.equipped_item_id
     }
 
@@ -848,76 +718,12 @@ impl PersistentData {
         self.get_character_files_by_animation_buffer(animation_buffer).as_ref().map(|buf| unsafe { buf.is_using_james_animation() }).unwrap_or(false)
     }
 
-    unsafe fn append_maria_hit_reactions_to_james_animation(&self, animation_buffer: *mut u8) {
-        let hit_reaction_buffer = animation_buffer.offset(game::MARIA_BYTES_FOR_JAMES_ANIM as isize);
-        hit_reaction_buffer.copy_from_nonoverlapping(self.maria_hit_reactions.as_ptr(), self.maria_hit_reactions.len());
+    unsafe fn unk_grunt_sound_value(&self) -> i32 {
+        self.unk_grunt_sound_value.unwrap()()
     }
 
-    unsafe fn set_maria_hit_reactions_start_index(&self, index: usize) {
-        let mut anim_description = self.maria_hit_reaction_descriptions;
-        let mut offset = 0;
-        for _ in 0..game::MARIA_NUM_HIT_REACTIONS {
-            let description = anim_description.as_mut().expect("animation description pointer should not be null");
-            if description.id == 0 {
-                // ID 0 is the end marker
-                break;
-            }
-
-            description.set_start_index(index + offset);
-            offset += description.num_frames as usize;
-
-            anim_description = anim_description.offset(1);
-        }
-    }
-
-    const fn get_default_frame_size(is_player_maria: bool) -> usize {
-        if is_player_maria {
-            game::MARIA_ANIMATION_FRAME_SIZE
-        } else {
-            game::JAMES_ANIMATION_FRAME_SIZE
-        }
-    }
-
-    fn dump_standard_transforms(&self) {
-        let num_transforms = if unsafe { self.is_player_maria() } {
-            game::MARIA_NUM_BONES
-        } else {
-            game::JAMES_NUM_BONES
-        };
-
-        for i in 0..num_transforms {
-            let transform = &self.bone_standard_transforms[i];
-            log::debug!("Standard transform {}: rotation = {}, translation = {}, original = {}", i, transform.rotation, transform.translation, transform.raw_transform);
-        }
-    }
-
-    unsafe fn get_player_animation_frame_size_with_index(&self, frame_index: Option<usize>) -> usize {
-        let is_player_maria = self.is_player_maria();
-
-        let Some(files) = self.get_player_files().as_ref() else {
-            return Self::get_default_frame_size(is_player_maria);
-        };
-
-        if is_player_maria && !files.is_using_james_animation() {
-            game::MARIA_ANIMATION_FRAME_SIZE
-        } else if !is_player_maria && !files.is_using_maria_animation() {
-            game::JAMES_ANIMATION_FRAME_SIZE
-        } else if let Some(frame_index) = frame_index {
-            // if we're past the end of the normal animation area, that means we've played into a
-            // hit reaction, which uses the character's normal frame size. otherwise, we need to
-            // swap the frame size.
-            if is_player_maria == (frame_index >= game::WEAPON_ANIM_NUM_FRAMES) {
-                game::MARIA_ANIMATION_FRAME_SIZE
-            } else {
-                game::JAMES_ANIMATION_FRAME_SIZE
-            }
-        } else {
-            Self::get_default_frame_size(is_player_maria)
-        }
-    }
-
-    unsafe fn get_player_animation_frame_size(&self) -> usize {
-        self.get_player_animation_frame_size_with_index(self.player().as_ref().map(|player| player.animation1.next_frame_index as usize))
+    unsafe fn sound_param_data(&self) -> &mut [u8] {
+        std::slice::from_raw_parts_mut(self.sound_param_data, 10)
     }
 }
 
@@ -928,148 +734,182 @@ unsafe fn is_maria_player(character_id: i16) -> bool {
     PersistentData::is_player_id(character_id) && GLOBAL.is_player_maria()
 }
 
-unsafe extern "C" fn get_frame_size() -> usize {
-    GLOBAL.get_player_animation_frame_size()
+unsafe extern "C" fn override_animation_paths() {
+    GLOBAL.set_weapon_animations();
 }
 
-unsafe extern "C" fn patch_animations_before_read(character: *mut game::Character) -> i32 {
-    let character = character.as_mut().expect("character pointer should not be null");
-
-    // watch for control panel interactions
-    CONTROL_PANEL.update_settings();
-    // TODO: support James
-    if !is_maria_player(character.id) {
-        return character.id as i32;
-    }
-
-    // if Maria isn't playing a James animation, we don't need to patch anything
-    if !GLOBAL.is_james_animation_buffer(character.animation_buffer) {
-        return character.id as i32;
-    }
-
-    // as one last step, we have Maria use her own hit reaction animations even when playing a
-    // James animation, so we need to not do the patching if we're running an animation out of the
-    // hit reaction portion of the buffer
-    if character.is_playing_hit_reaction() {
-        return character.id as i32;
-    }
-
-    // this is a James animation. override Maria's animation lists with ours.
-    GLOBAL.patch_animations_before_read(&raw mut character.animation1.records, &raw mut character.animation2.records);
-    game::JAMES_IDS[0] as i32
-}
-
-unsafe extern "C" fn patch_animations_after_read_maria(character: *mut game::Character) {
-    let character = character.as_mut().expect("character pointer should not be null");
-
-    if CONTROL_PANEL.check_dump_animation() {
-        character.animation1.dump_transforms();
-    }
-
-    // we're not doing any mapping if we get here, but let's still update the control panel display
-    let debug_text = match (character.id, CONTROL_PANEL.get_settings()) {
-        (game::MARIA_ID, Some((false, bone_index, debug_field, _, highlight_bone))) => {
-            let record = character.animation1.records.offset(bone_index as isize).as_mut().expect("animation pointer should not be null");
-            if highlight_bone == bone_index {
-                record.transform = (record.transform.mat4() * HIGHLIGHT_SCALE).into();
-            }
-
-            if debug_field != game::DebugField::None {
-                record.get_debug_string(debug_field)
-            } else {
-                String::new()
-            }
-        }
-        _ => String::new(),
-    };
-
-    CONTROL_PANEL.display(&debug_text);
-}
-
-unsafe extern "C" fn patch_animations_after_read(character: *mut game::Character) {
-    let character = character.as_mut().expect("character pointer should not be null");
-
-    // TODO: support James
-    // if we don't have original animation pointers, we didn't do anything
-    if !is_maria_player(character.id) || GLOBAL.original_animation1.is_null() || GLOBAL.original_animation2.is_null() {
-        return;
-    }
-
-    // update the original animations with the data from the temporary animations
-    GLOBAL.patch_animations_after_read(&raw mut character.animation1, &raw mut character.animation2);
-}
-
-unsafe extern "C" fn override_maria_animation_buffer_size(file: *mut game::FileInfo) -> usize {
-    let file_size = GLOBAL.request_file_size(file);
-
-    let Some(file) = file.as_mut() else {
-        log::warn!("Unexpected null FileInfo pointer when overriding Maria animation size");
-        return file_size;
-    };
-    // sanity check
-    let path = CStr::from_ptr(file.path);
-    if path != COLT_ANIM_NAME {
-        log::error!("Unexpected file path when overriding Maria animation size: {}", path.to_string_lossy());
-        return file_size;
-    }
-
-    // allocate animation buffer large enough to hold a James animation + Maria's hit reactions
-    // additionally, the size allocated for the James animation has to be a multiple of Maria's
-    // frame size to avoid issues when we play a hit reaction
-    game::MARIA_ANIM_BUFFER_BYTES_NEEDED
-}
-
-unsafe extern "C" fn append_hit_reactions(character_id: i32) -> *mut game::CharacterBuffers {
-    let buffers = GLOBAL.get_character_buffers(character_id);
-
-    // TODO: support James
-    if !is_maria_player(character_id as i16) {
-        return buffers;
-    }
-
-    // we only want to patch if we're Maria and we're playing a James animation
-    // when Maria is playing a James animation, the character ID on the character resources can
-    // get changed to James, so we'll look up the character files by animation buffer instead of ID
-    let Some(files) = buffers.as_ref().and_then(|buf| GLOBAL.get_character_files_by_animation_buffer(buf.animation_buffer).as_mut()) else {
-        return buffers;
-    };
-
-    if !PersistentData::is_player_id(files.character_id) {
-        log::error!("Unexpected character ID found with same animation buffer as player: {}", files.character_id);
-        return buffers;
-    }
-
-    if files.is_using_james_animation() {
-        // we're using a James animation - patch hit reactions into the end of the buffer
-        GLOBAL.append_maria_hit_reactions_to_james_animation(files.animation.buffer);
-        // also patch the hit reaction animation descriptions to point to the correct area in the
-        // buffer
-        GLOBAL.set_maria_hit_reactions_start_index(game::MARIA_MIN_FRAMES_FOR_JAMES_ANIM);
-    } else {
-        // we're not using a James animation. we don't need to patch the animation buffer, but we
-        // should restore the hit reaction indexes to their original values in case we were using
-        // a James animation before this.
-        GLOBAL.set_maria_hit_reactions_start_index(game::WEAPON_ANIM_NUM_FRAMES);
-    }
-
-    buffers
-}
-
-unsafe extern "C" fn hook_animation_description_change(_animation: *mut game::Animation, description: *mut game::AnimationDescription, character: *mut game::Character) -> usize {
-    let Some(chara) = character.as_ref() else {
-        log::warn!("Unexpected null character pointer when hooking animation description change");
+unsafe extern "C" fn james_sound_check(sound_parameters: *mut game::Sound3dParameters, animation_id: u32, animation_description: *const game::AnimationDescription) -> u32 {
+    if animation_id != 28 { // attacking
         return 0;
+    }
+
+    if GLOBAL.equipped_item_id() != game::ITEM_ID_CLEAVER {
+        return 0;
+    }
+
+    let grunt_sound_value = GLOBAL.unk_grunt_sound_value();
+    let mut character_sound = game::JAMES_GRUNT_SOUND_ID | if (grunt_sound_value & 1) == 0 {
+        1
+    } else {
+        0
     };
 
-    if PersistentData::is_player_id(chara.id) {
-        // this is a decent place to check for any updates to the model data, as I would certainly expect
-        // a new animation to be set if the model changes. there might be more timely spots, though, if
-        // we decide to do some extra patching (e.g. SetCharacterAddresses)
-        GLOBAL.set_standard_transforms(character);
+    // set sound parameters
+    if (*animation_description).unk04 > 0 {
+        let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
+        let sound_param_data = GLOBAL.sound_param_data();
 
-        GLOBAL.get_player_animation_frame_size_with_index(description.as_ref().map(|d| d.frame_index_start as usize))
-    } else {
-        GLOBAL.get_character_frame_size(chara.id as i32)
+        let unk04 = match (sound_param_data[0], sound_param_data[7]) {
+            (3, 0) => {
+                character_sound += 1;
+                Some(11)
+            }
+            (4, 0) => Some(10),
+            (3, _) => {
+                character_sound += 1;
+                Some(7)
+            }
+            (4, _) => Some(7),
+            _ => None,
+        };
+        if let Some(unk04) = unk04 {
+            sound_parameters[0].start_frame = unk04;
+            sound_parameters[1].start_frame = unk04;
+        }
+
+        let grunt_sound_float = (GLOBAL.unk_grunt_sound_value() as f32) * 4.6566129e-10;
+
+        sound_parameters[0].unk00 = 0.89999998;
+        sound_parameters[1].unk00 = grunt_sound_float * 0.7;
+    }
+
+    (character_sound << 16) | game::CLEAVER_ATTACK_SOUND_ID
+}
+
+unsafe extern "C" fn maria_sound_check(sound_parameters: *mut game::Sound3dParameters, animation_id: u32, animation_description: *const game::AnimationDescription) -> u32 {
+    let item_id = GLOBAL.equipped_item_id();
+    match (animation_id, item_id) {
+        (8 | 9 | 10, game::ITEM_ID_GREAT_KNIFE) => {
+            let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
+            sound_parameters[0].unk00 = 0.30000001;
+            sound_parameters[0].start_frame = 5;
+            sound_parameters[1].unk00 = 0.30000001;
+            sound_parameters[1].start_frame = 18;
+
+            (game::GREAT_KNIFE_DRAG_SOUND_ID << 16) | game::GREAT_KNIFE_DRAG_SOUND_ID
+        }
+        (28, game::ITEM_ID_WOODEN_PLANK | game::ITEM_ID_STEEL_PIPE | game::ITEM_ID_GREAT_KNIFE) => {
+            let grunt_sound_value = GLOBAL.unk_grunt_sound_value();
+            let mut character_sound = game::MARIA_GRUNT_SOUND_ID | if (grunt_sound_value & 1) == 0 {
+                1
+            } else {
+                0
+            };
+
+            let weapon_sound = if item_id == game::ITEM_ID_GREAT_KNIFE {
+                game::GREAT_KNIFE_ATTACK_SOUND_ID
+            } else {
+                game::DEFAULT_MELEE_ATTACK_SOUND_ID
+            };
+
+            if (*animation_description).unk04 <= 0 {
+                return (character_sound << 16) | weapon_sound;
+            }
+
+            let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
+            let sound_param_data = GLOBAL.sound_param_data();
+            match item_id {
+                game::ITEM_ID_WOODEN_PLANK => {
+                    match sound_param_data[0] {
+                        3 => {
+                            if sound_param_data[7] == 0 {
+                                sound_parameters[0].start_frame = 11;
+                                sound_parameters[1].start_frame = 11;
+                            } else {
+                                sound_parameters[0].start_frame = 7;
+                                sound_parameters[1].start_frame = 7;
+                            }
+
+                            character_sound += 1;
+                        }
+                        4 => {
+                            if sound_param_data[7] == 0 {
+                                sound_parameters[0].start_frame = 10;
+                                sound_parameters[1].start_frame = 10;
+                            } else {
+                                sound_parameters[0].start_frame = 7;
+                                sound_parameters[1].start_frame = 7;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                game::ITEM_ID_STEEL_PIPE => {
+                    match sound_param_data[0] {
+                        3 => {
+                            if sound_param_data[7] == 0 {
+                                sound_parameters[0].start_frame = 8;
+                                sound_parameters[1].start_frame = 8;
+                            } else {
+                                sound_parameters[0].start_frame = 2;
+                                sound_parameters[1].start_frame = 2;
+                            }
+
+                            character_sound += 1;
+                        }
+                        4 => {
+                            if sound_param_data[7] == 0 {
+                                sound_parameters[0].start_frame = 15;
+                                sound_parameters[1].start_frame = 13;
+                            } else {
+                                sound_parameters[0].start_frame = 9;
+                                sound_parameters[1].start_frame = 9;
+                            }
+                        }
+                        5 => {
+                            sound_parameters[0].start_frame = 8;
+                            sound_parameters[1].start_frame = 7;
+                            character_sound += 1;
+                        }
+                        _ => (),
+                    }
+                }
+                game::ITEM_ID_GREAT_KNIFE => {
+                    match sound_param_data[0] {
+                        3 => {
+                            if sound_param_data[4] == 0 {
+                                sound_parameters[0].start_frame = 8;
+                                sound_parameters[1].start_frame = 8;
+                            } else {
+                                sound_parameters[0].start_frame = 11;
+                                sound_parameters[1].start_frame = 11;
+                            }
+
+                            character_sound += 1;
+                        }
+                        4 => {
+                            if sound_param_data[4] == 0 {
+                                sound_parameters[0].start_frame = 17;
+                                sound_parameters[1].start_frame = 17;
+                            } else {
+                                sound_parameters[0].start_frame = 18;
+                                sound_parameters[1].start_frame = 18;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                _ => unreachable!(),
+            }
+
+            let grunt_sound_float = (GLOBAL.unk_grunt_sound_value() as f32) * 4.6566129e-10;
+
+            sound_parameters[0].unk00 = 0.89999998;
+            sound_parameters[1].unk00 = grunt_sound_float * 0.7;
+
+            (character_sound << 16) | weapon_sound
+        }
+        _ => 0,
     }
 }
 
@@ -1175,6 +1015,10 @@ fn main(reason: u32) -> Result<()> {
         Some(animation_read_func),
         Some(draw_message_func),
         Some(hit_animation_func),
+        Some(james_action_sounds_address),
+        Some(maria_action_sounds_address),
+        Some(grunt_sound_call_address),
+        Some(sound_parameter_select_address),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
@@ -1192,6 +1036,10 @@ fn main(reason: u32) -> Result<()> {
             &ANIMATION_READ_FUNC,
             &DRAW_MESSAGE_FUNC,
             &HIT_ANIMATION_FUNC,
+            &JAMES_ACTION_SOUNDS,
+            &MARIA_ACTION_SOUNDS,
+            &GRUNT_SOUND_CALL,
+            &SOUND_PARAMETER_SELECT,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -1200,7 +1048,7 @@ fn main(reason: u32) -> Result<()> {
     };
     log::debug!(
         "Found tex ref data at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
-        James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}",
+        James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}",
         tex_ref_call_address as usize,
         colt_anim_push_address as usize,
         address_set_msg_push_address as usize,
@@ -1216,6 +1064,10 @@ fn main(reason: u32) -> Result<()> {
         animation_read_func as usize,
         draw_message_func as usize,
         hit_animation_func as usize,
+        james_action_sounds_address as usize,
+        maria_action_sounds_address as usize,
+        grunt_sound_call_address as usize,
+        sound_parameter_select_address as usize,
     );
 
     unsafe {
@@ -1241,12 +1093,29 @@ fn main(reason: u32) -> Result<()> {
         let anim_frame_size_check_address = anim_source_file_push_address.offset(-256);
         patch::assert_byte(anim_frame_size_check_address, 0xE8)?; // call
 
+        let james_action_sounds_switch = james_action_sounds_address.offset(4);
+        patch::assert_byte(james_action_sounds_switch, 0x0F)?; // ja
+
+        let maria_action_sounds_switch = maria_action_sounds_address.offset(7);
+        patch::assert_byte(maria_action_sounds_switch, 0x0F)?; // ja
+
         let request_file_size_address = patch::get_call_target(colt_anim_check_address) as usize;
         let set_character_addresses_address = patch::get_call_target(address_set_msg_check_address) as usize;
         let get_character_frame_size_address = patch::get_call_target(anim_frame_size_check_address) as usize;
+        let james_sounds_switch_default = patch::get_conditional_jump_target(james_action_sounds_switch);
+        let maria_sounds_switch_default = patch::get_conditional_jump_target(maria_action_sounds_switch);
         // make sure the addresses look reasonable
-        let [true, true, true] = searcher.find_addresses_exec(&[request_file_size_address, set_character_addresses_address, get_character_frame_size_address], sh2pc)? else {
-            bail!("RequestFileSize() @ {:#08X}, SetCharacterAddresses() @ {:#08X}, and/or GetCharacterFrameSize @ {:#08X} don't look right", request_file_size_address, set_character_addresses_address, get_character_frame_size_address);
+        if !searcher.find_addresses_exec(
+            &[
+                request_file_size_address,
+                set_character_addresses_address,
+                get_character_frame_size_address,
+                james_sounds_switch_default as usize,
+                maria_sounds_switch_default as usize,
+            ],
+            sh2pc)?.iter().all(|f| *f) {
+            bail!("RequestFileSize() @ {:#08X}, SetCharacterAddresses() @ {:#08X}, GetCharacterFrameSize @ {:#08X}, James sound switch default {:#08X}, and/or Maria sound switch default {:#08X} don't look right",
+                request_file_size_address, set_character_addresses_address, get_character_frame_size_address, james_sounds_switch_default as usize, maria_sounds_switch_default as usize);
         };
 
         let get_character_buffers_call_address = (set_character_addresses_address + 0x13) as *const c_void;
@@ -1292,38 +1161,36 @@ fn main(reason: u32) -> Result<()> {
         /*let weapon_player_check_address1 = weapon_assert_address.offset(-63);
         patch::assert_byte(weapon_player_check_address1, 0x0F)?; // jnz*/
 
+        let load_weapon_address = weapon_assert_address.offset(-82);
+        patch::assert_byte(load_weapon_address, 0xE8)?; // call
+
         let weapon_player_check_address2 = weapon_assert_address.offset(357);
         patch::assert_byte(weapon_player_check_address2, 0x75)?; // jnz
 
         let maria_weapon_assert_address = weapon_assert_address.offset(3);
         // no point asserting since this is still within our search string
 
+        let load_weapon_address2 = weapon_assert_address2.offset(-87);
+        patch::assert_byte(load_weapon_address2, 0xE8)?; // call
+
         let maria_weapon_assert_address2 = weapon_assert_address2.offset(3);
         // no point asserting since this is still within our search string
 
-        // hit reaction animations
-        let maria_hit_animation_check_address = hit_animation_func.offset(13);
-        patch::assert_byte(maria_hit_animation_check_address, 0xB8)?; // mov
-
         // get pointer to equipped item ID and player character flag
-        let equipped_item_id_address = std::ptr::read_unaligned(weapon_assert_address.offset(-43) as *const *mut u8);
+        let equipped_item_id_address = std::ptr::read_unaligned(weapon_assert_address.offset(-43) as *const *mut i8);
         let player_character_flag_address = std::ptr::read_unaligned(weapon_assert_address.offset(-75) as *const *const u8);
         let character_files_address = std::ptr::read_unaligned(character_files_check_address.offset(1) as *const *mut game::CharacterFiles);
         let character_files_end_address = std::ptr::read_unaligned(character_files_end_check_address.offset(1) as *const *mut game::CharacterFiles);
-        let maria_hit_animations_address = std::ptr::read_unaligned(maria_hit_animation_check_address.offset(1) as *const *mut game::AnimationDescription);
         let player_ptr_address = std::ptr::read_unaligned(demo_anim_check_address.offset(1) as *const *mut *mut game::Character);
+        let sound_param_data_address = std::ptr::read_unaligned(sound_parameter_select_address.offset(-4) as *const *mut u8);
         // make sure the addresses look reasonable
-        if !searcher.find_addresses_write(&[equipped_item_id_address as usize, player_character_flag_address as usize, character_files_address as usize, character_files_end_address as usize, maria_hit_animations_address as usize, player_ptr_address as usize], sh2pc)?.iter().all(|&a| a) {
-            bail!("One or more of the following addresses don't look right: equipped item ID address {:#08X}, player character flag address {:#08X}, character files address {:#08X}, character files end address {:#08X}, Maria hit animations address {:#08X}, player pointer address {:#08X}",
-                equipped_item_id_address as usize, player_character_flag_address as usize,character_files_address as usize, character_files_end_address as usize, maria_hit_animations_address as usize, player_ptr_address as usize,
+        if !searcher.find_addresses_write(
+            &[equipped_item_id_address as usize, player_character_flag_address as usize, character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize]
+            , sh2pc)?.iter().all(|&a| a) {
+            bail!("One or more of the following addresses don't look right: equipped item ID address {:#08X}, player character flag address {:#08X}, character files address {:#08X}, character files end address {:#08X}, player pointer address {:#08X}, sound param data address {:#08X}",
+                equipped_item_id_address as usize, player_character_flag_address as usize,character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize,
             );
         };
-
-        let james_animation_offset_address = animation_offset_func.offset(0x30);
-        patch::assert_byte(james_animation_offset_address, 0xB8)?; // mov
-
-        let maria_animation_offset_address = animation_offset_func.offset(0x78);
-        patch::assert_byte(maria_animation_offset_address, 0xB8)?; // mov
 
         // prepare to rearrange weapon data entries
         let weapon_data_ptr_address = weapon_assert_address.offset(169);
@@ -1335,41 +1202,31 @@ fn main(reason: u32) -> Result<()> {
                 size_of::<usize>(),
             )
             .try_into()?,
-        ) as *mut u8;
+        ) as *mut game::WeaponInfo;
         patch::assert_byte(weapon_data_address, 0)?;
 
-        let james_weapon_end_address = weapon_data_address.offset(180);
-        patch::assert_byte(james_weapon_end_address, 0xFF)?;
+        let james_weapon_end = weapon_data_address.offset(9);
+        patch::assert_byte(james_weapon_end, 0xFF)?;
 
-        let maria_weapon_cleaver_address = weapon_data_address.offset(240);
-        patch::assert_byte(maria_weapon_cleaver_address, 17)?;
+        let maria_weapon_cleaver = weapon_data_address.offset(12);
+        patch::assert_byte(maria_weapon_cleaver, 17)?;
 
-        let maria_weapon_end_address = weapon_data_address.offset(260);
-        patch::assert_byte(maria_weapon_end_address, 0xFF)?;
-
-        // animation mapping
-        let anim_before_read_address = animation_read_func.offset(9);
-        patch::assert_byte(anim_before_read_address, 0x05)?; // add
-
-        let anim_after_read_address1 = animation_read_func.offset(122);
-        patch::assert_byte(anim_after_read_address1, 0x0F)?; // jz
-
-        let anim_after_read_address2 = animation_read_func.offset(144);
-        patch::assert_byte(anim_after_read_address2, 0xE9)?; // jmp
-
-        let anim_after_maria_read_address = animation_read_func.offset(222);
-        patch::assert_byte(anim_after_maria_read_address, 0x83)?; // add
-
-        let anim_after_maria_return_address = animation_read_func.offset(284);
-        patch::assert_byte(anim_after_maria_return_address, 0x0F)?; // movsx
+        let maria_weapon_end = weapon_data_address.offset(13);
+        patch::assert_byte(maria_weapon_end, 0xFF)?;
 
         // messages
         patch::assert_byte(draw_message_func, 0x8B)?; // mov
 
+        let grunt_sound_call_check_address = grunt_sound_call_address.offset(4);
+        patch::assert_byte(grunt_sound_call_check_address, 0xE8)?; // call
+
+        let grunt_sound_call = patch::get_call_target(grunt_sound_call_check_address) as usize;
+
         // initialize static data
-        GLOBAL.init(&game::JAMES_SKELETON, equipped_item_id_address, player_character_flag_address, request_file_size_address,
-            get_character_buffers_address, character_files_address, character_files_end_address, maria_hit_animations_address,
-            player_ptr_address, get_character_frame_size_address)?;
+        GLOBAL.init(equipped_item_id_address, player_character_flag_address, request_file_size_address,
+            get_character_buffers_address, character_files_address, character_files_end_address,
+            player_ptr_address, get_character_frame_size_address, weapon_data_address, grunt_sound_call,
+            sound_param_data_address);
         CONTROL_PANEL.set_draw_message_ptr(draw_message_func);
 
         let icon_coords_addr_bytes = (icon_coords_ptr as usize).to_le_bytes();
@@ -1448,95 +1305,60 @@ fn main(reason: u32) -> Result<()> {
             &(game::NUM_ITEMS as u8).to_le_bytes(),
         )?;
 
-        // FIXME: skipping this for now; we should get a full understanding of how things work with
-        //  Maria, then circle back to James
-        // increase memory for James' weapon animations
-        /*log::info!("Applying James animation patch at addresses {:#08X}, {:#08X}", james_anim_address1 as usize, james_anim_address2 as usize);
-        let size_bytes = game::MARIA_ANIMATION_SIZE.to_le_bytes();
-        patch::patch(james_anim_address1.offset(2), &size_bytes)?;
-        patch::patch(james_anim_address2.offset(2), &size_bytes)?;*/
-
-        log::info!("Applying Maria animation buffer size patch at address {:#08X}", colt_anim_check_address as usize);
-        // patch Maria's animation buffer size calculation so we can make room for a James animation + Maria's hit reactions
-        let maria_animation_size_call = patch::call(colt_anim_check_address as usize, override_maria_animation_buffer_size as usize);
-        patch::patch(colt_anim_check_address, &maria_animation_size_call)?;
-
         // merge James and Maria's weapon lists into a single contiguous list
         log::info!("Merging weapon lists");
 
-        let james_weapon_end =
-            std::slice::from_raw_parts_mut(james_weapon_end_address, game::WEAPON_INFO_SIZE);
-        let maria_weapon_end =
-            std::slice::from_raw_parts(maria_weapon_end_address, game::WEAPON_INFO_SIZE);
-        let maria_weapon_cleaver =
-            std::slice::from_raw_parts_mut(maria_weapon_cleaver_address, game::WEAPON_INFO_SIZE);
-
-        james_weapon_end.copy_from_slice(maria_weapon_cleaver); // replace James' end marker with the cleaver
-        maria_weapon_cleaver.copy_from_slice(maria_weapon_end); // replace the cleaver with the end marker
+        james_weapon_end.copy_from_nonoverlapping(maria_weapon_cleaver, 1); // replace James' end marker with the cleaver
+        maria_weapon_cleaver.copy_from_nonoverlapping(maria_weapon_end, 1); // replace the cleaver with the end marker
 
         // we now have every weapon in one big list, but we'll still start Maria at the old start of her list
         // so she gets the proper animation for no weapon
 
         // now we patch the logic
         log::info!(
-            "Patching weapon selection logic at addresses {:#08X}, {:#08X}, {:#08X}",
+            "Patching weapon selection logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}, {:#08X}",
             maria_weapon_assert_address as usize,
             weapon_player_check_address2 as usize,
-            maria_weapon_assert_address2 as usize
+            maria_weapon_assert_address2 as usize,
+            load_weapon_address as usize,
+            load_weapon_address2 as usize,
         );
         patch::patch(maria_weapon_assert_address, &CHECK_JAMES_WEAPON_LIST)?;
         patch::patch(weapon_player_check_address2, &[0x90, 0x90])?; // nop out jump to always use James path
         patch::patch(maria_weapon_assert_address2, &CHECK_JAMES_WEAPON_LIST2)?;
 
-        // select correct animation offset based on equipped weapon
-        log::info!("Patching animation offset logic at addresses {:#08X}, {:#08X}", james_animation_offset_address as usize, maria_animation_offset_address as usize);
+        let zero_memory_address = patch::get_call_target(load_weapon_address);
+        patch::set_trampoline(&mut GLOBAL.load_weapon_thunk, 1, override_animation_paths as usize)?;
+        let load_weapon_call = patch::call(load_weapon_address as usize, &raw const GLOBAL.load_weapon_thunk as usize);
+        patch::set_trampoline(&mut GLOBAL.load_weapon_thunk, 7, zero_memory_address as usize)?;
+        patch::patch(load_weapon_address, &load_weapon_call)?;
 
-        patch::set_trampoline(&mut GLOBAL.james_anim_offset_thunk, 5, get_frame_size as usize)?;
-        let james_animation_offset_call = patch::call(james_animation_offset_address as usize, &raw const GLOBAL.james_anim_offset_thunk as usize);
-        patch::patch(james_animation_offset_address, &james_animation_offset_call)?;
+        let zero_memory_address2 = patch::get_call_target(load_weapon_address2);
+        patch::set_trampoline(&mut GLOBAL.load_weapon_thunk2, 1, override_animation_paths as usize)?;
+        let load_weapon_call2 = patch::call(load_weapon_address2 as usize, &raw const GLOBAL.load_weapon_thunk as usize);
+        patch::set_trampoline(&mut GLOBAL.load_weapon_thunk2, 7, zero_memory_address2 as usize)?;
+        patch::patch(load_weapon_address2, &load_weapon_call2)?;
 
-        patch::set_trampoline(&mut GLOBAL.maria_anim_offset_thunk, 5, get_frame_size as usize)?;
-        let maria_animation_offset_call = patch::call(maria_animation_offset_address as usize, &raw const GLOBAL.maria_anim_offset_thunk as usize);
-        patch::patch(maria_animation_offset_address, &maria_animation_offset_call)?;
+        // patch weapon sound logic
+        log::info!("Patching weapon sound logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", james_action_sounds_switch as usize, maria_action_sounds_switch as usize, james_sounds_switch_default as usize, maria_sounds_switch_default as usize);
 
-        // animation skeleton mapping
-        log::info!("Patching animation read logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", anim_before_read_address as usize, anim_after_read_address1 as usize, anim_after_read_address2 as usize, anim_after_maria_read_address as usize);
+        patch::set_trampoline_conditional(&mut GLOBAL.james_action_sound_thunk, 0, james_sounds_switch_default as usize)?;
+        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 16, james_sound_check as usize)?;
+        let james_sounds_switch2_default = patch::get_conditional_jump_target(james_sounds_switch_default.offset(16));
+        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 52, james_sounds_switch2_default as usize)?;
+        let james_sounds_original = james_action_sounds_switch.offset(6);
+        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 58, james_sounds_original as usize)?;
+        let james_sound_check_jump = patch::jmp(james_action_sounds_switch as usize, &raw const GLOBAL.james_action_sound_thunk as usize);
+        patch::patch(james_action_sounds_switch, &james_sound_check_jump)?;
 
-        // patch before reading the animation so we can switch to the James or Maria path as appropriate
-        patch::set_trampoline(&mut GLOBAL.anim_read_thunk, 5, patch_animations_before_read as usize)?;
-        let anim_before_read_call = patch::call(anim_before_read_address as usize, &raw const GLOBAL.anim_read_thunk as usize);
-        patch::patch(anim_before_read_address, &anim_before_read_call)?;
-
-        // when exiting the James path, we need to perform the appropriate mapping of James transformations to Maria transformations
-        patch::set_trampoline(&mut GLOBAL.after_anim_read_thunk, 2, patch_animations_after_read as usize)?;
-        let original_jump_target = patch::get_call_target(anim_after_read_address2);
-        patch::set_trampoline(&mut GLOBAL.after_anim_read_thunk, 9, original_jump_target as usize)?;
-        let anim_after_read_jump2 = patch::jmp(anim_after_read_address2 as usize, &raw const GLOBAL.after_anim_read_thunk as usize);
-        patch::patch(anim_after_read_address2, &anim_after_read_jump2)?;
-
-        // there's also an earlier, conditional exit of this path
-        let anim_after_read_jump1 = patch::jz(anim_after_read_address1 as usize, &raw const GLOBAL.after_anim_read_thunk as usize);
-        patch::patch(anim_after_read_address1, &anim_after_read_jump1)?;
-
-        // we still patch in the case where Maria's playing her own animation so we can update the debug display
-        patch::set_trampoline(&mut GLOBAL.after_maria_anim_read_thunk, 2, patch_animations_after_read_maria as usize)?;
-        patch::set_trampoline(&mut GLOBAL.after_maria_anim_read_thunk, 12, anim_after_maria_return_address as usize)?;
-        let anim_after_maria_read_jump = patch::jmp(anim_after_maria_read_address as usize, &raw const GLOBAL.after_maria_anim_read_thunk as usize);
-        patch::patch(anim_after_maria_read_address, &anim_after_maria_read_jump)?;
-
-        log::info!("Patching animation buffer logic at addresses {:#08X}, {:#08X}", get_character_buffers_call_address as usize, get_character_frame_size_address);
-
-        // hook into the update of the player's animation buffer so we can fill in hit reactions and adjust offsets
-        let character_buffers_call = patch::call(get_character_buffers_call_address as usize, append_hit_reactions as usize);
-        patch::patch(get_character_buffers_call_address, &character_buffers_call)?;
-
-        // patch the call to get the animation frame size when a new animation is selected from the current animation
-        // file. we've already hooked this function, but the problem is that the animation description isn't set on
-        // the character until after the call, so we don't have the information to tell which part of the animation
-        // we're in. we'll hook this spot specifically to override the frame size.
-        patch::set_trampoline(&mut GLOBAL.anim_description_change_thunk, 7, hook_animation_description_change as usize)?;
-        let anim_description_frame_size_call = patch::call(anim_frame_size_check_address as usize, &raw const GLOBAL.anim_description_change_thunk as usize);
-        patch::patch(anim_frame_size_check_address, &anim_description_frame_size_call)?;
+        patch::set_trampoline_conditional(&mut GLOBAL.maria_action_sound_thunk, 0, maria_sounds_switch_default as usize)?;
+        patch::set_trampoline(&mut GLOBAL.maria_action_sound_thunk, 16, maria_sound_check as usize)?;
+        let maria_sounds_switch2_default = patch::get_conditional_jump_target(maria_sounds_switch_default.offset(6));
+        patch::set_trampoline(&mut GLOBAL.maria_action_sound_thunk, 52, maria_sounds_switch2_default as usize)?;
+        let maria_sounds_original = maria_action_sounds_switch.offset(6);
+        patch::set_trampoline(&mut GLOBAL.maria_action_sound_thunk, 58, maria_sounds_original as usize)?;
+        let maria_sound_check_jump = patch::jmp(maria_action_sounds_switch as usize, &raw const GLOBAL.maria_action_sound_thunk as usize);
+        patch::patch(maria_action_sounds_switch, &maria_sound_check_jump)?;
     }
 
     log::info!("All patches applied successfully");

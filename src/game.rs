@@ -241,11 +241,42 @@ impl Default for AnimationRecord {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
+pub struct Sound3dParameters {
+    pub unk00: f32,
+    pub start_frame: i8,
+    pub unk05: i8,
+    pub unk06: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
 pub struct FileInfo {
     pub path: *const std::ffi::c_char,
-    pub size: usize,
+    pub size: isize,
     pub offset: usize,
     pub flags: u32,
+}
+
+impl FileInfo {
+    pub const fn new(path: &'static CStr) -> Self {
+        Self {
+            path: path.as_ptr(),
+            size: -1,
+            offset: 0,
+            flags: 1,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct WeaponInfo {
+    pub item_id: i16,
+    pub object_id: i16,
+    pub animation: *mut FileInfo,
+    pub model1: *mut FileInfo,
+    pub model2: *mut FileInfo,
+    pub kg1: *mut FileInfo,
 }
 
 #[repr(C)]
@@ -683,7 +714,7 @@ pub const MARIA_TO_JAMES_SKELETON_MAP: [isize; 36] = [
 pub const MARIA_NUM_BONES: usize = MARIA_TO_JAMES_SKELETON_MAP.len();
 
 pub const NUM_ITEMS: usize = 90;
-pub const WEAPON_INFO_SIZE: usize = 20;
+pub const NUM_WEAPON_INFOS: usize = 14;
 pub const MARIA_ANIMATION_FRAME_SIZE: usize = 464;
 pub const JAMES_ANIMATION_FRAME_SIZE: usize = 528;
 
@@ -701,6 +732,25 @@ pub const MARIA_HIT_REACTIONS_ANIM_SIZE: usize = MARIA_WEAPON_ANIM_SIZE - MARIA_
 pub const MARIA_MIN_FRAMES_FOR_JAMES_ANIM: usize = JAMES_WEAPON_ANIM_SIZE.div_ceil(MARIA_ANIMATION_FRAME_SIZE);
 pub const MARIA_BYTES_FOR_JAMES_ANIM: usize = MARIA_MIN_FRAMES_FOR_JAMES_ANIM * MARIA_ANIMATION_FRAME_SIZE;
 pub const MARIA_ANIM_BUFFER_BYTES_NEEDED: usize = MARIA_BYTES_FOR_JAMES_ANIM + MARIA_HIT_REACTIONS_ANIM_SIZE;
+
+pub const CLEAVER_ATTACK_SOUND_ID: u32 = 17034;
+pub const GREAT_KNIFE_ATTACK_SOUND_ID: u32 = 11039;
+pub const GREAT_KNIFE_DRAG_SOUND_ID: u32 = 11067;
+pub const DEFAULT_MELEE_ATTACK_SOUND_ID: u32 = 11027;
+pub const JAMES_GRUNT_SOUND_ID: u32 = 11018;
+pub const MARIA_GRUNT_SOUND_ID: u32 = 17030;
+
+pub const ITEM_ID_NONE: i8 = -1;
+pub const ITEM_ID_HANDGUN: i8 = 4;
+pub const ITEM_ID_SHOTGUN: i8 = 6;
+pub const ITEM_ID_RIFLE: i8 = 8;
+pub const ITEM_ID_REVOLVER: i8 = 10;
+pub const ITEM_ID_HYPER_SPRAY: i8 = 12;
+pub const ITEM_ID_WOODEN_PLANK: i8 = 13;
+pub const ITEM_ID_STEEL_PIPE: i8 = 14;
+pub const ITEM_ID_GREAT_KNIFE: i8 = 15;
+pub const ITEM_ID_CHAINSAW: i8 = 16;
+pub const ITEM_ID_CLEAVER: i8 = 17;
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),
