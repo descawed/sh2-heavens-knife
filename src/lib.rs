@@ -27,6 +27,10 @@ const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex\0";
 const COLT_ANIM_NAME: &CStr = c"data/chr2/mar/xmar_wpcolt.anm";
 const ADDRESS_SET_MSG: &[u8] = b"bg_chara.c:Cant't set character address.";
 const DEMO_ANIM_NAME: &[u8] = b"data/demo/jisatsu_a/bos.anm";
+const HANDGUN_MODEL_NAME: &[u8] = b"data/chr/wp/wp_handgun.mdl\0";
+const REVOLVER_MODEL_NAME: &[u8] = b"data/chr2/wp/wp_colt.mdl\0";
+const CHAINSAW_KG1_NAME: &[u8] = b"data/chr/wp/wp_csaw.kg1\0";
+const REVOLVER_KG1_NAME: &[u8] = b"data/chr2/wp/wp_colt.kg1\0";
 const ANIM_SOURCE_FILE: &[u8] = b"\\projects\\sh2pc\\src\\Chacter\\m3_sc.c";
 const MODEL_MAGIC: u32 = 0xffff0003;
 const JAMES_ICON_DRAW_LOOP: [u8; 16] = [
@@ -949,16 +953,24 @@ fn main(reason: u32) -> Result<()> {
         Some(address_set_msg_address),
         Some(demo_anim_address),
         Some(anim_source_file_address),
-    ] = searcher.find_bytes(&[ICON_TEX_NAME, COLT_ANIM_NAME.to_bytes(), ADDRESS_SET_MSG, DEMO_ANIM_NAME, ANIM_SOURCE_FILE], Some(PAGE_READONLY), sh2pc)? else {
+        Some(handgun_model_name_address),
+        Some(revolver_model_name_address),
+        Some(chainsaw_kg1_name_address),
+        Some(revolver_kg1_name_address),
+    ] = searcher.find_bytes(&[ICON_TEX_NAME, COLT_ANIM_NAME.to_bytes(), ADDRESS_SET_MSG, DEMO_ANIM_NAME, ANIM_SOURCE_FILE, HANDGUN_MODEL_NAME, REVOLVER_MODEL_NAME, CHAINSAW_KG1_NAME, REVOLVER_KG1_NAME], Some(PAGE_READONLY), sh2pc)? else {
         bail!("Failed to find read-only data");
     };
     let colt_anim_address = colt_anim_address as usize;
     let address_set_msg_address = address_set_msg_address as usize;
     let demo_anim_address = demo_anim_address as usize;
     let anim_source_file_address = anim_source_file_address as usize;
+    let handgun_model_name_address = handgun_model_name_address as usize;
+    let revolver_model_name_address = revolver_model_name_address as usize;
+    let chainsaw_kg1_name_address = chainsaw_kg1_name_address as usize;
+    let revolver_kg1_name_address = revolver_kg1_name_address as usize;
     log::debug!(
-        "Found item menu texture path at {:#08X}, colt animation path at {:#08X}, address set msg at {:#08X}, demo anim address at {:#08X}, anim source file address at {:#08X}",
-        tex_address as usize, colt_anim_address, address_set_msg_address, demo_anim_address, anim_source_file_address,
+        "Found item menu texture path at {:#08X}, colt animation path at {:#08X}, address set msg at {:#08X}, demo anim address at {:#08X}, anim source file address at {:#08X}, handgun model name at {:#08X}, revolver model name at {:#08X}, chainsaw kg1 name at {:#08X}, revolver kg1 name at {:#08X}",
+        tex_address as usize, colt_anim_address, address_set_msg_address, demo_anim_address, anim_source_file_address, handgun_model_name_address, revolver_model_name_address, chainsaw_kg1_name_address, revolver_kg1_name_address,
     );
 
     let mut menu_data: [u8; 16] = [0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 1, 0, 0, 0];
@@ -968,19 +980,34 @@ fn main(reason: u32) -> Result<()> {
     let icon_coords_ptr = game::ICON_COORDS.as_ptr() as *const u8;
     let icon_coords_buf = unsafe { std::slice::from_raw_parts(icon_coords_ptr, 12) };
 
-    let [Some(menu_address), Some(icon_coord_address), Some(colt_anim_file_address), Some(demo_anim_file_address)] = searcher.find_bytes(
-        &[&menu_data, icon_coords_buf, &colt_anim_address.to_le_bytes(), &demo_anim_address.to_le_bytes()],
+    let [
+        Some(menu_address),
+        Some(icon_coord_address),
+        Some(colt_anim_file_address),
+        Some(demo_anim_file_address),
+        Some(handgun_model_file_address),
+        Some(revolver_model_file_address),
+        Some(chainsaw_kg1_file_address),
+        Some(revolver_kg1_file_address),
+    ] = searcher.find_bytes(
+        &[
+            &menu_data, icon_coords_buf, &colt_anim_address.to_le_bytes(), &demo_anim_address.to_le_bytes(), &handgun_model_name_address.to_le_bytes(), &revolver_model_name_address.to_le_bytes(), &chainsaw_kg1_name_address.to_le_bytes(), &revolver_kg1_name_address.to_le_bytes(),
+        ],
         Some(PAGE_READWRITE | PAGE_WRITECOPY),
         sh2pc,
     )? else {
         bail!("Failed to find .data values");
     };
     log::debug!(
-        "Found menu data at {:#08X}, icon coords at {:#08X}, Colt anim file at {:#08X}, demo anim file at {:#08X}",
+        "Found menu data at {:#08X}, icon coords at {:#08X}, Colt anim file at {:#08X}, demo anim file at {:#08X}, handgun model file at {:#08X}, revolver model file at {:#08X}, chainsaw kg1 file at {:#08X}, revolver kg1 file at {:#08X}",
         menu_address as usize,
         icon_coord_address as usize,
         colt_anim_file_address as usize,
         demo_anim_file_address as usize,
+        handgun_model_file_address as usize,
+        revolver_model_file_address as usize,
+        chainsaw_kg1_file_address as usize,
+        revolver_kg1_file_address as usize,
     );
 
     // Maria vs James texture check
@@ -992,6 +1019,10 @@ fn main(reason: u32) -> Result<()> {
     let address_set_msg_data = patch::push(address_set_msg_address);
     // animation referenced near a reference to the player pointer
     let demo_anim_data = patch::push(demo_anim_file_address as usize);
+    // reference to handgun model used to determine weapon model buffer size
+    let handgun_model_data = patch::push(handgun_model_file_address as usize);
+    // reference to chainsaw shadow used to determine weapon shadow buffer size
+    let chainsaw_kg1_data = patch::push(chainsaw_kg1_file_address as usize);
 
     let source_bytes = anim_source_file_address.to_le_bytes();
     let anim_source_file_data = [
@@ -1005,6 +1036,8 @@ fn main(reason: u32) -> Result<()> {
         Some(address_set_msg_push_address),
         Some(demo_anim_push_address),
         Some(anim_source_file_push_address),
+        Some(handgun_model_push_address),
+        Some(chainsaw_kg1_push_address),
         Some(james_icon_draw_loop_address),
         Some(maria_icon_draw_loop_address),
         Some(weapon_assert_address),
@@ -1026,6 +1059,8 @@ fn main(reason: u32) -> Result<()> {
             &address_set_msg_data,
             &demo_anim_data,
             &anim_source_file_data,
+            &handgun_model_data,
+            &chainsaw_kg1_data,
             &JAMES_ICON_DRAW_LOOP,
             &MARIA_ICON_DRAW_LOOP,
             &MARIA_WEAPON_ASSERT,
@@ -1048,7 +1083,8 @@ fn main(reason: u32) -> Result<()> {
     };
     log::debug!(
         "Found tex ref data at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
-        James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}",
+        James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
+        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}",
         tex_ref_call_address as usize,
         colt_anim_push_address as usize,
         address_set_msg_push_address as usize,
@@ -1068,6 +1104,8 @@ fn main(reason: u32) -> Result<()> {
         maria_action_sounds_address as usize,
         grunt_sound_call_address as usize,
         sound_parameter_select_address as usize,
+        handgun_model_push_address as usize,
+        chainsaw_kg1_push_address as usize,
     );
 
     unsafe {
@@ -1098,6 +1136,9 @@ fn main(reason: u32) -> Result<()> {
 
         let maria_action_sounds_switch = maria_action_sounds_address.offset(7);
         patch::assert_byte(maria_action_sounds_switch, 0x0F)?; // ja
+
+        let handgun_model_push_address2 = handgun_model_push_address.offset(410);
+        patch::assert_byte(handgun_model_push_address2, 0x68)?; // push
 
         let request_file_size_address = patch::get_call_target(colt_anim_check_address) as usize;
         let set_character_addresses_address = patch::get_call_target(address_set_msg_check_address) as usize;
@@ -1338,6 +1379,12 @@ fn main(reason: u32) -> Result<()> {
         let load_weapon_call2 = patch::call(load_weapon_address2 as usize, &raw const GLOBAL.load_weapon_thunk as usize);
         patch::set_trampoline(&mut GLOBAL.load_weapon_thunk2, 7, zero_memory_address2 as usize)?;
         patch::patch(load_weapon_address2, &load_weapon_call2)?;
+
+        // make sure James allocates enough memory to hold the Colt model
+        log::info!("Patching weapon buffer allocation logic at addresses {:#08X}, {:#08X}", handgun_model_push_address as usize, handgun_model_push_address2 as usize);
+        patch::patch(handgun_model_push_address, &patch::push(revolver_model_file_address as usize))?;
+        patch::patch(handgun_model_push_address2, &patch::push(revolver_model_file_address as usize))?;
+        patch::patch(chainsaw_kg1_push_address, &patch::push(revolver_kg1_file_address as usize))?;
 
         // patch weapon sound logic
         log::info!("Patching weapon sound logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", james_action_sounds_switch as usize, maria_action_sounds_switch as usize, james_sounds_switch_default as usize, maria_sounds_switch_default as usize);

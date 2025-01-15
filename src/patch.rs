@@ -53,7 +53,6 @@ pub const fn push(addr: usize) -> [u8; 5] {
     [0x68, bytes[0], bytes[1], bytes[2], bytes[3]]
 }
 
-
 // supports either call or jmp
 pub unsafe fn set_trampoline(trampoline: &mut [u8], call_offset: usize, to: usize) -> Result<()> {
     let ptr = trampoline.as_ptr();
