@@ -584,7 +584,7 @@ impl PersistentData {
         };
 
         // skip James' no-weapon animation
-        // special handling for handgun
+        weapon_info[1].animation = &raw mut animations.handgun;
         weapon_info[2].animation = &raw mut animations.shotgun;
         weapon_info[3].animation = &raw mut animations.rifle;
         weapon_info[4].animation = &raw mut animations.hyper_spray;
@@ -596,16 +596,7 @@ impl PersistentData {
         // the weapon lists
         weapon_info[9].animation = &raw mut animations.cleaver;
         // skip Maria's no-weapon animation
-        // special handling for revolver
-
-        // special handling for the handguns - use the character's own handgun animation for both
-        if is_player_maria {
-            weapon_info[1].animation = &raw mut animations.revolver;
-            weapon_info[11].animation = &raw mut animations.revolver;
-        } else {
-            weapon_info[1].animation = &raw mut animations.handgun;
-            weapon_info[11].animation = &raw mut animations.handgun;
-        }
+        weapon_info[11].animation = &raw mut animations.revolver;
     }
 
     const unsafe fn is_player_maria(&self) -> bool {
@@ -1381,7 +1372,7 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(load_weapon_address2, &load_weapon_call2)?;
 
         // make sure James allocates enough memory to hold the Colt model
-        log::info!("Patching weapon buffer allocation logic at addresses {:#08X}, {:#08X}, {:#08X}", handgun_model_push_address as usize, handgun_model_push_address2 as usize, chainsaw_kg1_push_address);
+        log::info!("Patching weapon buffer allocation logic at addresses {:#08X}, {:#08X}, {:#08X}", handgun_model_push_address as usize, handgun_model_push_address2 as usize, chainsaw_kg1_push_address as usize);
         patch::patch(handgun_model_push_address, &patch::push(revolver_model_file_address as usize))?;
         patch::patch(handgun_model_push_address2, &patch::push(revolver_model_file_address as usize))?;
         patch::patch(chainsaw_kg1_push_address, &patch::push(revolver_kg1_file_address as usize))?;
