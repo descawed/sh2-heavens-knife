@@ -1381,7 +1381,7 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(load_weapon_address2, &load_weapon_call2)?;
 
         // make sure James allocates enough memory to hold the Colt model
-        log::info!("Patching weapon buffer allocation logic at addresses {:#08X}, {:#08X}", handgun_model_push_address as usize, handgun_model_push_address2 as usize);
+        log::info!("Patching weapon buffer allocation logic at addresses {:#08X}, {:#08X}, {:#08X}", handgun_model_push_address as usize, handgun_model_push_address2 as usize, chainsaw_kg1_push_address);
         patch::patch(handgun_model_push_address, &patch::push(revolver_model_file_address as usize))?;
         patch::patch(handgun_model_push_address2, &patch::push(revolver_model_file_address as usize))?;
         patch::patch(chainsaw_kg1_push_address, &patch::push(revolver_kg1_file_address as usize))?;
