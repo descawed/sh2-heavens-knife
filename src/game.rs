@@ -733,6 +733,11 @@ pub const MARIA_MIN_FRAMES_FOR_JAMES_ANIM: usize = JAMES_WEAPON_ANIM_SIZE.div_ce
 pub const MARIA_BYTES_FOR_JAMES_ANIM: usize = MARIA_MIN_FRAMES_FOR_JAMES_ANIM * MARIA_ANIMATION_FRAME_SIZE;
 pub const MARIA_ANIM_BUFFER_BYTES_NEEDED: usize = MARIA_BYTES_FOR_JAMES_ANIM + MARIA_HIT_REACTIONS_ANIM_SIZE;
 
+pub const HANDGUN_RELOAD_SOUND_ID: u32 = 11029;
+pub const SHOTGUN_SOUND_ID1: u32 = 11068;
+pub const SHOTGUN_SOUND_ID2: u32 = 11053;
+pub const RIFLE_RELOAD_SOUND_ID: u32 = 11050;
+pub const HYPER_SPRAY_RELOAD_SOUND_ID: u32 = 11055;
 pub const CLEAVER_ATTACK_SOUND_ID: u32 = 17034;
 pub const GREAT_KNIFE_ATTACK_SOUND_ID: u32 = 11039;
 pub const GREAT_KNIFE_DRAG_SOUND_ID: u32 = 11067;
@@ -740,6 +745,19 @@ pub const DEFAULT_MELEE_ATTACK_SOUND_ID: u32 = 11027;
 pub const JAMES_GRUNT_SOUND_ID: u32 = 11018;
 pub const MARIA_GRUNT_SOUND_ID: u32 = 17030;
 
+/*
+  weaponItemIds[0] = -1;                             // none
+  weaponItemIds[1] = 4;                              // handgun
+  weaponItemIds[2] = 6;                              // shotgun
+  weaponItemIds[3] = 8;                              // rifle
+  weaponItemIds[4] = 12;                             // hyper spray
+  weaponItemIds[5] = 13;                             // wooden plank
+  weaponItemIds[6] = 14;                             // steel pipe
+  weaponItemIds[7] = 16;                             // chainsaw
+  weaponItemIds[8] = 15;                             // great knife
+  weaponItemIds[9] = 10;                             // revolver
+  weaponItemIds[10] = 17;                            // cleaver
+ */
 pub const ITEM_ID_NONE: i8 = -1;
 pub const ITEM_ID_HANDGUN: i8 = 4;
 pub const ITEM_ID_SHOTGUN: i8 = 6;

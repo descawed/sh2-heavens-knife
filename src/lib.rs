@@ -739,60 +739,133 @@ unsafe extern "C" fn james_sound_check(sound_parameters: *mut game::Sound3dParam
         return 0;
     }
 
-    if GLOBAL.equipped_item_id() != game::ITEM_ID_CLEAVER {
-        return 0;
-    }
+    let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
+    match GLOBAL.equipped_item_id() {
+        game::ITEM_ID_REVOLVER => {
+            let animation_id = (*animation_description).id;
+            if animation_id == 21109 || animation_id == 21110 {
+                sound_parameters[0].unk00 = 0.80000001;
+                sound_parameters[0].start_frame = if animation_id == 21109 {
+                    21
+                } else {
+                    26
+                };
 
-    let grunt_sound_value = GLOBAL.unk_grunt_sound_value();
-    let mut character_sound = game::JAMES_GRUNT_SOUND_ID | if (grunt_sound_value & 1) == 0 {
-        1
-    } else {
-        0
-    };
-
-    // set sound parameters
-    if (*animation_description).unk04 > 0 {
-        let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
-        let sound_param_data = GLOBAL.sound_param_data();
-
-        let start_frame = match (sound_param_data[0], sound_param_data[7]) {
-            (3, 0) => {
-                character_sound += 1;
-                Some(11)
+                game::HANDGUN_RELOAD_SOUND_ID
+            } else {
+                0
             }
-            (4, 0) => Some(10),
-            (3, _) => {
-                character_sound += 1;
-                Some(7)
-            }
-            (4, _) => Some(7),
-            _ => None,
-        };
-        if let Some(start_frame) = start_frame {
-            sound_parameters[0].start_frame = start_frame;
-            sound_parameters[1].start_frame = start_frame;
         }
+        game::ITEM_ID_CLEAVER => {
+            let grunt_sound_value = GLOBAL.unk_grunt_sound_value();
+            let mut character_sound = game::JAMES_GRUNT_SOUND_ID | if (grunt_sound_value & 1) == 0 {
+                1
+            } else {
+                0
+            };
 
-        let grunt_sound_float = (GLOBAL.unk_grunt_sound_value() as f32) * 4.6566129e-10;
+            // set sound parameters
+            if (*animation_description).unk04 > 0 {
+                let sound_param_data = GLOBAL.sound_param_data();
 
-        sound_parameters[0].unk00 = 0.89999998;
-        sound_parameters[1].unk00 = grunt_sound_float * 0.7;
+                let start_frame = match (sound_param_data[0], sound_param_data[7]) {
+                    (3, 0) => {
+                        character_sound += 1;
+                        Some(11)
+                    }
+                    (4, 0) => Some(10),
+                    (3, _) => {
+                        character_sound += 1;
+                        Some(7)
+                    }
+                    (4, _) => Some(7),
+                    _ => None,
+                };
+                if let Some(start_frame) = start_frame {
+                    sound_parameters[0].start_frame = start_frame;
+                    sound_parameters[1].start_frame = start_frame;
+                }
+
+                let grunt_sound_float = (GLOBAL.unk_grunt_sound_value() as f32) * 4.6566129e-10;
+
+                sound_parameters[0].unk00 = 0.89999998;
+                sound_parameters[1].unk00 = grunt_sound_float * 0.7;
+            }
+
+            (character_sound << 16) | game::CLEAVER_ATTACK_SOUND_ID
+        }
+        _ => 0,
     }
-
-    (character_sound << 16) | game::CLEAVER_ATTACK_SOUND_ID
 }
 
 unsafe extern "C" fn maria_sound_check(sound_parameters: *mut game::Sound3dParameters, animation_id: u32, animation_description: *const game::AnimationDescription) -> u32 {
     let item_id = GLOBAL.equipped_item_id();
+    let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
+
     match (animation_id, item_id) {
         (8 | 9 | 10, game::ITEM_ID_GREAT_KNIFE) => {
-            let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
             sound_parameters[0].unk00 = 0.30000001;
             sound_parameters[0].start_frame = 5;
             sound_parameters[1].unk00 = 0.30000001;
             sound_parameters[1].start_frame = 18;
 
             (game::GREAT_KNIFE_DRAG_SOUND_ID << 16) | game::GREAT_KNIFE_DRAG_SOUND_ID
+        }
+        (28, game::ITEM_ID_HANDGUN | game::ITEM_ID_SHOTGUN | game::ITEM_ID_RIFLE | game::ITEM_ID_HYPER_SPRAY) => {
+            let mut character_sound = 0u32;
+            let mut weapon_sound = 0u32;
+
+            let animation_id = (*animation_description).id;
+            match item_id {
+                game::ITEM_ID_HANDGUN => {
+                    if animation_id == 209 || animation_id == 210 {
+                        weapon_sound = game::HANDGUN_RELOAD_SOUND_ID;
+                        sound_parameters[0].unk00 = 0.80000001;
+                        sound_parameters[0].start_frame = if animation_id == 209 {
+                            21
+                        } else {
+                            26
+                        };
+                    }
+                }
+                game::ITEM_ID_SHOTGUN => {
+                    sound_parameters[0].unk00 = 0.80000001;
+                    if animation_id == 260 {
+                        weapon_sound = game::SHOTGUN_SOUND_ID1;
+                        sound_parameters[0].start_frame = 12;
+                    } else {
+                        weapon_sound = game::SHOTGUN_SOUND_ID2;
+                        sound_parameters[0].start_frame = 23;
+                    };
+                }
+                game::ITEM_ID_RIFLE => {
+                    if animation_id == 304 {
+                        weapon_sound = game::RIFLE_RELOAD_SOUND_ID;
+                        sound_parameters[0].unk00 = 0.80000001;
+                        sound_parameters[0].start_frame = 17;
+                    }
+                }
+                game::ITEM_ID_HYPER_SPRAY => {
+                    if animation_id == 510 || animation_id == 511 {
+                        weapon_sound = game::HYPER_SPRAY_RELOAD_SOUND_ID;
+                        character_sound = game::HYPER_SPRAY_RELOAD_SOUND_ID;
+
+                        sound_parameters[0].unk00 = 0.80000001;
+                        sound_parameters[1].unk00 = 0.80000001;
+
+                        if animation_id == 510 {
+                            sound_parameters[0].start_frame = 7;
+                            sound_parameters[1].start_frame = 14;
+                        } else {
+                            sound_parameters[0].start_frame = 3;
+                            sound_parameters[1].start_frame = 10;
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+
+            (character_sound << 16) | weapon_sound
         }
         (28, game::ITEM_ID_WOODEN_PLANK | game::ITEM_ID_STEEL_PIPE | game::ITEM_ID_GREAT_KNIFE) => {
             let grunt_sound_value = GLOBAL.unk_grunt_sound_value();
@@ -812,7 +885,6 @@ unsafe extern "C" fn maria_sound_check(sound_parameters: *mut game::Sound3dParam
                 return (character_sound << 16) | weapon_sound;
             }
 
-            let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
             let sound_param_data = GLOBAL.sound_param_data();
             match item_id {
                 game::ITEM_ID_WOODEN_PLANK => {
