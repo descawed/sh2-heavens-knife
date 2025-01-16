@@ -355,7 +355,7 @@ struct PersistentData {
     pub anim_description_change_thunk: [u8; 16],
     pub load_weapon_thunk: [u8; 12],
     pub load_weapon_thunk2: [u8; 12],
-    pub james_action_sound_thunk: [u8; 63],
+    pub james_action_sound_thunk: [u8; 68],
     pub maria_action_sound_thunk: [u8; 63],
     pub original_animation1: *mut game::AnimationRecord,
     pub original_animation2: *mut game::AnimationRecord,
@@ -465,14 +465,14 @@ impl PersistentData {
             james_action_sound_thunk: [
                 0x0F, 0x87, 0, 0, 0, 0, // ja <default>
                 0x60, // pushad ; from edi, the last register pushed, we'll get the animation description
-                0x83, 0xC0, 0x03, // add eax, 3 ; prior code subtracts 3 from the animation ID
+                0x83, 0xC0, 0x02, // add eax, 2 ; prior code subtracts 2 from the animation ID
                 0x50, // push eax
                 0x8D, 0x44, 0x24, 0x38, // lea eax, [esp+56]
                 0x50, // push eax ; sound parameters
                 0xE8, 0, 0, 0, 0, // call <target>
                 0x83, 0xC4, 0x08, // add esp, 8
                 0x85, 0xC0, // test eax, eax
-                0x74, 0x1D, // jnz no_match
+                0x74, 0x22, // jnz no_match
                 0x5F, // pop edi
                 0x5E, // pop esi
                 0x5D, // pop ebp
@@ -486,6 +486,7 @@ impl PersistentData {
                 0x89, 0xCD, // mov ebp, ecx
                 0x59, // pop ecx
                 0x58, // pop eax
+                0xBB, 0x04, 0x00, 0x00, 0x00, // mov ebx, 4 ; loop bound
                 0xE9, 0, 0, 0, 0, // jmp <play_sound>
                 0x61, // no_match: popad
                 0xE9, 0, 0, 0, 0, // jmp <original>
@@ -754,7 +755,7 @@ unsafe extern "C" fn james_sound_check(sound_parameters: *mut game::Sound3dParam
         let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
         let sound_param_data = GLOBAL.sound_param_data();
 
-        let unk04 = match (sound_param_data[0], sound_param_data[7]) {
+        let start_frame = match (sound_param_data[0], sound_param_data[7]) {
             (3, 0) => {
                 character_sound += 1;
                 Some(11)
@@ -767,9 +768,9 @@ unsafe extern "C" fn james_sound_check(sound_parameters: *mut game::Sound3dParam
             (4, _) => Some(7),
             _ => None,
         };
-        if let Some(unk04) = unk04 {
-            sound_parameters[0].start_frame = unk04;
-            sound_parameters[1].start_frame = unk04;
+        if let Some(start_frame) = start_frame {
+            sound_parameters[0].start_frame = start_frame;
+            sound_parameters[1].start_frame = start_frame;
         }
 
         let grunt_sound_float = (GLOBAL.unk_grunt_sound_value() as f32) * 4.6566129e-10;
@@ -1383,9 +1384,9 @@ fn main(reason: u32) -> Result<()> {
         patch::set_trampoline_conditional(&mut GLOBAL.james_action_sound_thunk, 0, james_sounds_switch_default as usize)?;
         patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 16, james_sound_check as usize)?;
         let james_sounds_switch2_default = patch::get_conditional_jump_target(james_sounds_switch_default.offset(16));
-        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 52, james_sounds_switch2_default as usize)?;
+        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 57, james_sounds_switch2_default as usize)?;
         let james_sounds_original = james_action_sounds_switch.offset(6);
-        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 58, james_sounds_original as usize)?;
+        patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 63, james_sounds_original as usize)?;
         let james_sound_check_jump = patch::jmp(james_action_sounds_switch as usize, &raw const GLOBAL.james_action_sound_thunk as usize);
         patch::patch(james_action_sounds_switch, &james_sound_check_jump)?;
 
