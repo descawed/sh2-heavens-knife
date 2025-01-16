@@ -78,6 +78,9 @@ const GRUNT_SOUND_CALL: [u8; 5] = [
 const SOUND_PARAMETER_SELECT: [u8; 6] = [
     0x83, 0xE8, 0x06, 0x74, 0x15, 0x48,
 ];
+const ROTATE_BONE_TRANSFORM: [u8; 10] = [
+    0x89, 0x5D, 0x38, 0x89, 0x5D, 0x3C, 0x89, 0x5D, 0x40, 0xE8,
+];
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ControlSelection {
@@ -357,6 +360,7 @@ struct PersistentData {
     pub load_weapon_thunk2: [u8; 12],
     pub james_action_sound_thunk: [u8; 68],
     pub maria_action_sound_thunk: [u8; 63],
+    pub rotate_bone_transform_thunk: [u8; 37],
     pub original_animation1: *mut game::AnimationRecord,
     pub original_animation2: *mut game::AnimationRecord,
     player_character_flag: *const u8,
@@ -517,6 +521,21 @@ impl PersistentData {
                 0x58, // pop eax
                 0xE9, 0, 0, 0, 0, // jmp <play_sound>
                 0x61, // no_match: popad
+                0xE9, 0, 0, 0, 0, // jmp <original>
+            ],
+            rotate_bone_transform_thunk: [
+                0x83, 0xEC, 0x50, // sub esp, 0x50
+                0x53, // push ebx
+                0x55, // push ebp
+                0x8B, 0x5C, 0x24, 0x5C, // mov ebx, [esp+0x5c] ; animation
+                0x8B, 0x6C, 0x24, 0x60, // mov ebp, [esp+0x60] ; record
+                0x8B, 0x44, 0x24, 0x64, // mov eax, [esp+0x64] ; rotation
+                0x50, // push eax
+                0x55, // push ebp
+                0x53, // push ebx
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x83, 0xC4, 0x0C, // add esp, 12
+                0x89, 0x44, 0x24, 0x60, // mov [esp+0x60], eax
                 0xE9, 0, 0, 0, 0, // jmp <original>
             ],
             original_animation1: std::ptr::null_mut(),
@@ -981,6 +1000,35 @@ unsafe extern "C" fn maria_sound_check(sound_parameters: *mut game::Sound3dParam
     }
 }
 
+unsafe extern "C" fn equipped_weapon_transform_override(animation: *const game::Animation, record: *const game::AnimationRecord, rotation: *const game::D3DXVECTOR4) -> *const game::AnimationRecord {
+    let animation = animation.as_ref().expect("animation pointer should not be null");
+    let is_player_maria = GLOBAL.is_player_maria();
+    let frame_size = if is_player_maria {
+        game::MARIA_ANIMATION_FRAME_SIZE
+    } else {
+        game::JAMES_ANIMATION_FRAME_SIZE
+    };
+
+    if rotation != &raw const animation.equipped_weapon_rotation || animation.frame_size != frame_size {
+        // only want to intercept equipped weapon transform for the player
+        return record;
+    }
+
+    let bone_index = record.offset_from(animation.records);
+    let new_index = match (is_player_maria, GLOBAL.equipped_item_id(), bone_index) {
+        (true, game::ITEM_ID_HANDGUN, 27) => 21, // left shoulder
+        (true, game::ITEM_ID_HANDGUN, 28) => 23, // right shoulder
+        (true, game::ITEM_ID_RIFLE, 8) => 6, // head/neck
+        (true, game::ITEM_ID_RIFLE, 9) => 11, // head/neck
+        (true, game::ITEM_ID_RIFLE, 10) => 16, // head/neck
+        (false, game::ITEM_ID_REVOLVER, 21) => 27, // left shoulder
+        (false, game::ITEM_ID_REVOLVER, 23) => 28, // right shoulder
+        _ => bone_index,
+    };
+
+    animation.records.offset(new_index)
+}
+
 fn open_log() -> Result<()> {
     let log_file = File::create("sh2hvnknf.log")?;
     WriteLogger::init(LevelFilter::Debug, Config::default(), log_file)?;
@@ -1116,6 +1164,7 @@ fn main(reason: u32) -> Result<()> {
         Some(maria_action_sounds_address),
         Some(grunt_sound_call_address),
         Some(sound_parameter_select_address),
+        Some(rotate_bone_transform_address),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
@@ -1139,6 +1188,7 @@ fn main(reason: u32) -> Result<()> {
             &MARIA_ACTION_SOUNDS,
             &GRUNT_SOUND_CALL,
             &SOUND_PARAMETER_SELECT,
+            &ROTATE_BONE_TRANSFORM,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -1148,7 +1198,7 @@ fn main(reason: u32) -> Result<()> {
     log::debug!(
         "Found tex ref data at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
         James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
-        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}",
+        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}",
         tex_ref_call_address as usize,
         colt_anim_push_address as usize,
         address_set_msg_push_address as usize,
@@ -1170,6 +1220,7 @@ fn main(reason: u32) -> Result<()> {
         sound_parameter_select_address as usize,
         handgun_model_push_address as usize,
         chainsaw_kg1_push_address as usize,
+        rotate_bone_transform_address as usize,
     );
 
     unsafe {
@@ -1203,6 +1254,9 @@ fn main(reason: u32) -> Result<()> {
 
         let handgun_model_push_address2 = handgun_model_push_address.offset(410);
         patch::assert_byte(handgun_model_push_address2, 0x68)?; // push
+
+        let rotate_bone_func_address = rotate_bone_transform_address.offset(-42);
+        patch::assert_byte(rotate_bone_func_address, 0x83)?; // sub
 
         let request_file_size_address = patch::get_call_target(colt_anim_check_address) as usize;
         let set_character_addresses_address = patch::get_call_target(address_set_msg_check_address) as usize;
@@ -1470,6 +1524,14 @@ fn main(reason: u32) -> Result<()> {
         patch::set_trampoline(&mut GLOBAL.maria_action_sound_thunk, 58, maria_sounds_original as usize)?;
         let maria_sound_check_jump = patch::jmp(maria_action_sounds_switch as usize, &raw const GLOBAL.maria_action_sound_thunk as usize);
         patch::patch(maria_action_sounds_switch, &maria_sound_check_jump)?;
+
+        // patch weapon transform logic
+        log::info!("Patching equipped weapon transform logic at address {:#08X}", rotate_bone_func_address as usize);
+
+        patch::set_trampoline(&mut GLOBAL.rotate_bone_transform_thunk, 20, equipped_weapon_transform_override as usize)?;
+        patch::set_trampoline(&mut GLOBAL.rotate_bone_transform_thunk, 32, rotate_bone_func_address.offset(5) as usize)?;
+        let rotate_bone_transform_jump = patch::jmp(rotate_bone_func_address as usize, &raw const GLOBAL.rotate_bone_transform_thunk as usize);
+        patch::patch(rotate_bone_func_address, &rotate_bone_transform_jump)?;
     }
 
     log::info!("All patches applied successfully");
