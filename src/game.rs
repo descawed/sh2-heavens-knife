@@ -759,16 +759,121 @@ pub const MARIA_GRUNT_SOUND_ID: u32 = 17030;
   weaponItemIds[10] = 17;                            // cleaver
  */
 pub const ITEM_ID_NONE: i8 = -1;
+pub const ITEM_ID_NOTHING: i8 = 0;
+pub const ITEM_ID_HEALTH_DRINK: i8 = 1;
+pub const ITEM_ID_FIRST_AID_KIT: i8 = 2;
+pub const ITEM_ID_AMPOULE: i8 = 3;
 pub const ITEM_ID_HANDGUN: i8 = 4;
+pub const ITEM_ID_HANDGUN_BULLETS: i8 = 5;
 pub const ITEM_ID_SHOTGUN: i8 = 6;
+pub const ITEM_ID_SHOTGUN_SHELLS: i8 = 7;
 pub const ITEM_ID_RIFLE: i8 = 8;
+pub const ITEM_ID_RIFLE_SHELLS: i8 = 9;
 pub const ITEM_ID_REVOLVER: i8 = 10;
+pub const ITEM_ID_REVOLVER_BULLETS: i8 = 11;
 pub const ITEM_ID_HYPER_SPRAY: i8 = 12;
 pub const ITEM_ID_WOODEN_PLANK: i8 = 13;
 pub const ITEM_ID_STEEL_PIPE: i8 = 14;
 pub const ITEM_ID_GREAT_KNIFE: i8 = 15;
 pub const ITEM_ID_CHAINSAW: i8 = 16;
 pub const ITEM_ID_CLEAVER: i8 = 17;
+pub const ITEM_ID_PHOTO_OF_MARY: i8 = 20;
+pub const ITEM_ID_LETTER_FROM_MARY: i8 = 21;
+pub const ITEM_ID_WHITE_LIQUID: i8 = 85;
+pub const NUM_WEAPON_AMMO_ITEMS: usize = (ITEM_ID_CLEAVER - ITEM_ID_HANDGUN + 1) as usize;
+pub const MAX_ITEM_COUNT: u16 = 999;
+
+// the last 4 item slots referenced by icon stuff appear to be unused
+pub const NUM_USABLE_ITEMS: usize = 86;
+
+pub const ITEM_NAMES: [&'static str; NUM_USABLE_ITEMS] = [
+    "Nothing",
+    "Health drink",
+    "First-aid kit",
+    "Ampoule",
+    "Handgun",
+    "Handgun bullets",
+    "Shotgun",
+    "Shotgun shells",
+    "Hunting rifle",
+    "Rifle shells",
+    "Revolver",
+    "Revolver bullets",
+    "Hyper spray",
+    "Wooden plank",
+    "Steel pipe",
+    "Great knife",
+    "Chainsaw",
+    "Chinese cleaver",
+    "Flashlight",
+    "Radio",
+    "Photo of Mary",
+    "Letter from Mary",
+    "Laura's Letter",
+    "Videotape",
+    "Angela's knife",
+    "Dog key",
+    "Apartment gate key",
+    "Key to room 202",
+    "Clock key",
+    "Courtyard key",
+    "Fire escape key",
+    "Lyne house key",
+    "Apartment stairway key",
+    "Examination room key",
+    "Roof key",
+    "\"Purple Bull\" key",
+    "\"Lapis Eye\" key",
+    "Elevator key",
+    "Basement storeroom key",
+    "Hospital lobby key",
+    "Old bronze key",
+    "Spiral-writing key",
+    "Key of the Persecuted",
+    "Key to hotel room 312",
+    "Key to hotel room 204",
+    "Employee elevator key",
+    "Bar key",
+    "\"Fish\" key",
+    "Hotel stairway key",
+    "Canned juice",
+    "Coin [Snake]",
+    "Coin [Old Man]",
+    "Coin [Prisoner]",
+    "Piece of hair",
+    "Bent needle",
+    "Dry cell battery",
+    "Copper ring",
+    "Lead ring",
+    "Wrench",
+    "Tablet of \"The Oppressor\"",
+    "Tablet of \"Gluttonous Pig\"",
+    "Tablet of \"The Seductress\"",
+    "Horseshoe",
+    "Lighter",
+    "Wax doll",
+    "Wire cutter",
+    "Thinner",
+    "\"Little Mermaid\" music box",
+    "\"Cinderella\" music box",
+    "\"Snow White\" music box",
+    "Can opener",
+    "Light bulb",
+    "Rust-colored egg",
+    "Scarlet egg",
+    "Book: \"Lost Memories\"",
+    "Book: \"Crimson Ceremony\"",
+    "White chrism",
+    "Obsidian goblet",
+    "Blue Gem",
+    "White Board",
+    "Black Board",
+    "Red Board",
+    "Acacia key",
+    "Matches",
+    "Birthday card and present",
+    "White liquid",
+];
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),

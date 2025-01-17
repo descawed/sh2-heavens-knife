@@ -37,6 +37,16 @@ impl Keyboard {
         self.is_key_down(key) && self.old_keys[key.0 as usize] & 0x80 == 0
     }
 
+    pub fn is_any_key_down_once(&self, keys: &[VIRTUAL_KEY]) -> bool {
+        for key in keys {
+            if self.is_key_down_once(*key) {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub const fn is_key_toggled(&self, key: VIRTUAL_KEY) -> bool {
         self.new_keys[key.0 as usize] & 1 != 0
     }
