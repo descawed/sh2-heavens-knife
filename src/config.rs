@@ -21,6 +21,16 @@ impl Inventory {
         }
     }
 
+    pub fn iter_items(&self) -> impl Iterator<Item = (i8, Option<u16>)> + use<'_> {
+        (1..game::NUM_USABLE_ITEMS).into_iter().filter_map(move |item_id| {
+            (self.item_flags & (1 << item_id) != 0).then(|| {
+                let count = self.item_counts[item_id];
+                let item_id = item_id as i8;
+                (item_id, Self::has_count(item_id).then_some(count))
+            })
+        })
+    }
+
     pub const fn equip_item(&mut self, item_id: i8) {
         self.equipped_item = item_id;
         if item_id > 0 {
@@ -137,6 +147,10 @@ impl Inventory {
             _ => game::MAX_ITEM_COUNT,
         }
     }
+
+    pub const fn equipped_item(&self) -> i8 {
+        self.equipped_item
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +185,8 @@ impl Config {
             maria_starting_inventory: Inventory::new(),
         };
 
+        // Maria must start with the revolver equipped
+        this.maria_starting_inventory.equipped_item = game::ITEM_ID_REVOLVER;
         // give James his normal starting items as well
         this.james_starting_inventory.add_item(game::ITEM_ID_PHOTO_OF_MARY);
         this.james_starting_inventory.add_item(game::ITEM_ID_LETTER_FROM_MARY);
@@ -507,7 +523,8 @@ impl UserInterface {
                         } else {
                             inventory.toggle_item(selected_item);
                         }
-                    } else if self.keyboard.is_key_down_once(VK_E) {
+                    } else if self.keyboard.is_key_down_once(VK_E) && is_james {
+                        // can't change Maria's starting equipped weapon, otherwise the game crashes
                         inventory.toggle_equip(selected_item);
                     }
 
@@ -604,7 +621,11 @@ impl UserInterface {
 
                 self.message.set_message(|builder| {
                     builder.add_text("Equipped: ");
+                    if !is_james {
+                        builder.add_control_code(ControlCode::GrayscaleGradient);
+                    }
                     builder.add_text(Inventory::item_name(inventory.equipped_item));
+                    builder.add_control_code(ControlCode::White);
                     builder.add_control_code(ControlCode::LineBreak);
                     builder.add_control_code(ControlCode::LineBreak);
 
@@ -645,7 +666,11 @@ impl UserInterface {
                     }
 
                     builder.add_control_code(ControlCode::LineBreak);
-                    builder.add_text("Use E to equip, Esc to exit");
+                    builder.add_text(if is_james {
+                        "Use E to equip, Esc to exit"
+                    } else {
+                        "Use Esc to exit"
+                    });
                 });
             }
             State::ItemMapper(selected_option) => {
@@ -706,5 +731,17 @@ impl UserInterface {
         // clear the reference to it
         self.print_str("");
         self.print(std::ptr::null());
+    }
+
+    pub const fn starting_inventory(&self, is_james: bool) -> Option<&Inventory> {
+        if self.config.is_enabled {
+            Some(if is_james {
+                &self.config.james_starting_inventory
+            } else {
+                &self.config.maria_starting_inventory
+            })
+        } else {
+            None
+        }
     }
 }

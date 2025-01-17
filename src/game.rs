@@ -586,6 +586,61 @@ impl Character {
     }
 }
 
+#[repr(C)]
+#[derive(Debug)]
+pub struct Inventory {
+    pub flags: [u32; 3],
+    pub counts: [u16; 13], // only tracks counts for items where the count is significant
+    pub unk26: u8,
+    pub unk27: u8,
+    pub unk28: u8,
+    pub equipped_item: i8,
+    pub unk2a: u16,
+    pub unk2c: f32,
+    pub unk30: u16,
+    pub unk32: u16,
+    pub unk34: u16,
+    pub unk36: u16,
+    pub active_weapon_item: i8,
+    pub unk39: u8,
+    pub unk3a: u16,
+}
+
+impl Inventory {
+    pub const fn add_item(&mut self, item_id: i8) {
+        if item_id > 0 {
+            self.flags[(item_id as usize) >> 5] |= 1 << (item_id & 0x1F);
+        }
+    }
+
+    pub const fn set_item_count(&mut self, item_id: i8, count: u16) {
+        if item_id > 0 {
+            let index = item_id as usize;
+            if index < self.counts.len() {
+                self.counts[index] = count;
+            }
+        }
+    }
+
+    pub const fn clear(&mut self) {
+        self.flags = [0; 3];
+        self.counts = [0; 13];
+        self.unk26 = 0;
+        self.unk27 = 0;
+        self.unk28 = 0;
+        self.equipped_item = 0;
+        self.unk2a = 0;
+        self.unk2c = 0.0;
+        self.unk30 = 0;
+        self.unk32 = 0;
+        self.unk34 = 0;
+        self.unk36 = 0;
+        self.active_weapon_item = 0;
+        self.unk39 = 0;
+        self.unk3a = 0;
+    }
+}
+
 pub const JAMES_SKELETON: [i8; 41] = [
     -1,
     -1,
@@ -1089,6 +1144,10 @@ mod tests {
     #[test]
     fn character_size() {
         assert_eq!(size_of::<Character>(), 0x2cc);
+    }
+
+    fn inventory_size() {
+        assert_eq!(size_of::<Inventory>(), 0x3c);
     }
 
     #[test]

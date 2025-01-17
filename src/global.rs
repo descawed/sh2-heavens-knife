@@ -35,6 +35,8 @@ pub struct PersistentData {
     get_character_buffers: Option<unsafe extern "C" fn(character_id: i32) -> *mut game::CharacterBuffers>,
     get_character_frame_size: Option<unsafe extern "C" fn(character_id: i32) -> usize>,
     draw_message_ptr: Option<unsafe extern "C" fn(*const u8)>,
+    inc_item_count: Option<unsafe extern "C" fn()>,
+    add_item_to_inventory: Option<unsafe extern "C" fn(item_id: i32)>,
     character_files: *mut game::CharacterFiles,
     character_files_end: *mut game::CharacterFiles,
     player_ptr: *mut *mut game::Character,
@@ -43,6 +45,7 @@ pub struct PersistentData {
     weapon_info: *mut game::WeaponInfo,
     unk_grunt_sound_value: Option<unsafe extern "C" fn() -> i32>,
     sound_param_data: *mut u8,
+    inventory: *mut game::Inventory,
 }
 
 impl PersistentData {
@@ -233,6 +236,8 @@ impl PersistentData {
             get_character_buffers: None,
             get_character_frame_size: None,
             draw_message_ptr: None,
+            inc_item_count: None,
+            add_item_to_inventory: None,
             character_files: std::ptr::null_mut(),
             character_files_end: std::ptr::null_mut(),
             player_ptr: std::ptr::null_mut(),
@@ -263,25 +268,29 @@ impl PersistentData {
             weapon_info: std::ptr::null_mut(),
             unk_grunt_sound_value: None,
             sound_param_data: std::ptr::null_mut(),
+            inventory: std::ptr::null_mut(),
         }
     }
 
     pub fn init(&mut self, equipped_item_id: *mut i8, player_character_flag: *const u8, request_file_size: usize, get_character_buffers: usize,
             character_files: *mut game::CharacterFiles, character_files_end: *mut game::CharacterFiles, player_ptr: *mut *mut game::Character,
             get_character_frame_size: usize, weapon_info: *mut game::WeaponInfo, grunt_sound_selector: usize, sound_param_data: *mut u8,
-            draw_message_ptr: usize) {
+            draw_message_ptr: usize, inc_item_count: usize, add_item_to_inventory: usize, inventory: *mut game::Inventory) {
         self.equipped_item_id = equipped_item_id;
         self.player_character_flag = player_character_flag;
         self.request_file_size = Some(unsafe { std::mem::transmute(request_file_size) });
         self.get_character_buffers = Some(unsafe { std::mem::transmute(get_character_buffers) });
         self.get_character_frame_size = Some(unsafe { std::mem::transmute(get_character_frame_size) });
         self.draw_message_ptr = Some(unsafe { std::mem::transmute(draw_message_ptr) });
+        self.inc_item_count = Some(unsafe { std::mem::transmute(inc_item_count) });
+        self.add_item_to_inventory = Some(unsafe { std::mem::transmute(add_item_to_inventory) });
         self.character_files = character_files;
         self.character_files_end = character_files_end;
         self.player_ptr = player_ptr;
         self.weapon_info = weapon_info;
         self.unk_grunt_sound_value = Some(unsafe { std::mem::transmute(grunt_sound_selector) });
         self.sound_param_data = sound_param_data;
+        self.inventory = inventory;
     }
 
     pub unsafe fn set_weapon_animations(&mut self) {
@@ -315,6 +324,10 @@ impl PersistentData {
 
     pub const unsafe fn equipped_item_id(&self) -> i8 {
         *self.equipped_item_id
+    }
+
+    pub const unsafe fn set_equipped_item(&self, item_id: i8) {
+        *self.equipped_item_id = item_id;
     }
 
     pub const unsafe fn is_player_id(id: i16) -> bool {
@@ -437,5 +450,17 @@ impl PersistentData {
 
     pub unsafe fn print_message(&self, msg: &game::Message) {
         self.print(msg.data());
+    }
+
+    pub unsafe fn inc_item_count(&self) {
+        self.inc_item_count.unwrap()();
+    }
+
+    pub unsafe fn add_item_to_inventory(&self, item_id: i8) {
+        self.add_item_to_inventory.unwrap()(item_id as i32);
+    }
+
+    pub unsafe fn inventory(&self) -> &mut game::Inventory {
+        self.inventory.as_mut().expect("inventory pointer should not be null")
     }
 }
