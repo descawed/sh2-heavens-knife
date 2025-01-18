@@ -453,7 +453,6 @@ enum State {
 pub struct UserInterface {
     config: Config,
     draw_message_ptr: Option<unsafe extern "C" fn(*const u8)>,
-    draw_message_positioned_ptr: Option<unsafe extern "C" fn(*const u8, i32, i32)>,
     message: game::Message,
     state: State,
     keyboard: input::Keyboard,
@@ -467,7 +466,6 @@ impl UserInterface {
         Self {
             config,
             draw_message_ptr: None,
-            draw_message_positioned_ptr: None,
             message: game::Message::new(),
             state: State::StatusIndicator,
             keyboard: input::Keyboard::new(),
@@ -604,7 +602,7 @@ impl UserInterface {
                         }
                         MainMenuOption::InventoryEditor => {
                             if self.keyboard.is_any_key_down_once(&[VK_RETURN, VK_SPACE]) {
-                                self.state = State::InventoryEditor(game::ITEM_ID_HEALTH_DRINK, game::ITEM_ID_HEALTH_DRINK);
+                                self.state = State::InventoryEditor(game::ITEM_ID_MIN, game::ITEM_ID_MIN);
                             }
                         }
                         MainMenuOption::ItemMapper => {
@@ -642,7 +640,7 @@ impl UserInterface {
                     } else if self.keyboard.is_any_key_down_once(&[VK_DOWN, VK_S]) {
                         selected_item += 1;
                         if selected_item > game::ITEM_ID_MAX {
-                            selected_item = game::ITEM_ID_HEALTH_DRINK;
+                            selected_item = game::ITEM_ID_MIN;
                         }
                     } else if self.keyboard.is_any_key_down_once(&[VK_LEFT, VK_A]) {
                         if game::item_has_count(selected_item) {
@@ -1014,37 +1012,16 @@ impl UserInterface {
         !matches!(self.state, State::StatusIndicator)
     }
 
-    pub unsafe fn set_funcs(&mut self, draw_message_ptr: usize, draw_message_positioned_ptr: usize) {
+    pub unsafe fn set_funcs(&mut self, draw_message_ptr: usize) {
         self.draw_message_ptr = Some(std::mem::transmute(draw_message_ptr));
-        self.draw_message_positioned_ptr = Some(std::mem::transmute(draw_message_positioned_ptr));
-    }
-
-    pub fn print_positioned(&self, data: *const u8, x: i32, y: i32) {
-        unsafe { self.draw_message_positioned_ptr.unwrap()(data, x, y) };
-    }
-
-    pub fn print_message_positioned(&self, msg: &game::Message, x: i32, y: i32) {
-        self.print_positioned(msg.data(), x, y);
     }
 
     pub fn print(&self, data: *const u8) {
         unsafe { self.draw_message_ptr.unwrap()(data) };
     }
 
-    pub fn print_str(&mut self, text: &str) {
-        self.message.set_message_from_str(text);
-        self.print(self.message.data());
-    }
-
     pub fn print_message(&self, msg: &game::Message) {
         self.print(msg.data());
-    }
-
-    pub fn clear_message(&mut self) {
-        // draw an empty string to clear the text on the screen, then call with a null pointer to
-        // clear the reference to it
-        self.print_str("");
-        self.print(std::ptr::null());
     }
 
     pub const fn starting_inventory(&self, is_james: bool) -> Option<&game::Inventory> {

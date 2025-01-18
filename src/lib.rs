@@ -1,11 +1,10 @@
 #![allow(static_mut_refs)]
 
-use std::ffi::{c_void, CStr};
+use std::ffi::c_void;
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
 use std::panic;
 use std::path::Path;
-use std::os::windows::fs::FileExt;
 
 use anyhow::{bail, Context, Result};
 use simplelog::{Config, LevelFilter, WriteLogger};
@@ -14,7 +13,6 @@ use windows::Win32::System::Memory::{
     PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
 };
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 mod game;
 mod patch;
@@ -23,22 +21,15 @@ mod config;
 mod global;
 use global::*;
 
-use game::{Mat4, Vec3, Vec4};
-
 const CONFIG_FILENAME: &str = "knife.toml";
 
 // search strings to find the areas we want to patch
 const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex\0";
-const COLT_ANIM_NAME: &CStr = c"data/chr2/mar/xmar_wpcolt.anm";
-const ADDRESS_SET_MSG: &[u8] = b"bg_chara.c:Cant't set character address.";
-const DEMO_ANIM_NAME: &[u8] = b"data/demo/jisatsu_a/bos.anm";
 const HANDGUN_MODEL_NAME: &[u8] = b"data/chr/wp/wp_handgun.mdl\0";
 const REVOLVER_MODEL_NAME: &[u8] = b"data/chr2/wp/wp_colt.mdl\0";
 const CHAINSAW_KG1_NAME: &[u8] = b"data/chr/wp/wp_csaw.kg1\0";
 const REVOLVER_KG1_NAME: &[u8] = b"data/chr2/wp/wp_colt.kg1\0";
-const ANIM_SOURCE_FILE: &[u8] = b"\\projects\\sh2pc\\src\\Chacter\\m3_sc.c";
 const PAUSED_TEXT: &[u8] = b"\\hPAUSED\0";
-const MODEL_MAGIC: u32 = 0xffff0003;
 const JAMES_ICON_DRAW_LOOP: [u8; 16] = [
     0x66, 0x8B, 0x50, 0x04, 0x66, 0x2B, 0x10, 0x83, 0xC0, 0x3C, 0x66, 0x89, 0x51, 0xFE, 0x66, 0x8B,
 ];
@@ -55,22 +46,8 @@ const CHECK_JAMES_WEAPON_LIST2: [u8; 7] = [
     0x31, 0xD2, // xor edx, edx
     0xE9, 0x75, 0x00, 0x00, 0x00, // jmp +117 bytes
 ];
-const JAMES_ANIMATION_SIZE1: [u8; 6] = [0x81, 0xC5, 0x00, 0x40, 0x08, 0x00];
-const JAMES_ANIMATION_SIZE2: [u8; 6] = [0x81, 0xC1, 0x00, 0x40, 0x08, 0x00];
-const ANIMATION_OFFSET_FUNC: [u8; 16] = [
-    0x0F, 0xB7, 0x44, 0x24, 0x04, 0x3D, 0x09, 0x02, 0x00, 0x00, 0x0F, 0x8F, 0xBC, 0x00, 0x00, 0x00
-];
-const ANIMATION_READ_FUNC: [u8; 16] = [
-    0x56, 0x8B, 0x74, 0x24, 0x08, 0x0F, 0xBF, 0x46, 0x10, 0x05, 0x00, 0xFF, 0xFF, 0xFF, 0x83, 0xF8,
-];
-/*const DRAW_MESSAGE_FUNC: [u8; 19] = [
-    0x8B, 0x74, 0x24, 0x30, 0x8B, 0x7C, 0x24, 0x2C, 0x8B, 0x6C, 0x24, 0x28, 0x8B, 0x54, 0x24, 0x24, 0x8D, 0x46, 0x02,
-];*/
 const DRAW_MESSAGE_FUNC: [u8; 9] = [
     0x8B, 0x44, 0x24, 0x04, 0x85, 0xC0, 0x75, 0x06, 0xA3,
-];
-const HIT_ANIMATION_FUNC: [u8; 11] = [
-    0x0E, 0x01, 0x56, 0x75, 0x44, 0x81, 0xFF, 0x21, 0x4E, 0x00, 0x00,
 ];
 const JAMES_ACTION_SOUNDS: [u8; 6] = [
     0xFE, 0x83, 0xF8, 0x1B, 0x0F, 0x87,
@@ -90,12 +67,6 @@ const ROTATE_BONE_TRANSFORM: [u8; 10] = [
 const MAIN_MENU_FUNC1: [u8; 5] = [
     0x00, 0x00, 0x70, 0x42, 0xB9,
 ];
-const DIFFICULTY_SELECTION: [u8; 10] = [
-    0x68, 0x3C, 0xFF, 0xFF, 0xFF, 0xBF, 0x05, 0x00, 0x00, 0x00,
-];
-const DRAW_DARKENED_BACKGROUND: [u8; 5] = [
-    0xC0, 0xFF, 0xFF, 0xFF, 0x1B,
-];
 const INIT_INVENTORY: [u8; 7] = [
     0x00, 0x00, 0x10, 0x00, 0x6A, 0x15, 0x89,
 ];
@@ -108,265 +79,8 @@ const MENU_INPUT_LOOP: [u8; 8] = [
     0x09, 0x00, 0x00, 0x00, 0x83, 0xC4, 0x0C, 0x89,
 ];
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum ControlSelection {
-    Character,
-    Bone,
-    MaxCopy,
-    Field,
-}
-
-impl ControlSelection {
-    const fn next(self) -> Self {
-        match self {
-            ControlSelection::Character => ControlSelection::Bone,
-            ControlSelection::Bone => ControlSelection::MaxCopy,
-            ControlSelection::MaxCopy => ControlSelection::Field,
-            ControlSelection::Field => ControlSelection::Character,
-        }
-    }
-
-    const fn prev(self) -> Self {
-        match self {
-            ControlSelection::Character => ControlSelection::Field,
-            ControlSelection::Bone => ControlSelection::Character,
-            ControlSelection::MaxCopy => ControlSelection::Bone,
-            ControlSelection::Field => ControlSelection::MaxCopy,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct ControlPanel {
-    keyboard: input::Keyboard,
-    is_james: bool,
-    debug_bone_index: usize,
-    debug_field: game::DebugField,
-    selection: ControlSelection,
-    is_enabled: bool,
-    max_copy_index: usize,
-    message: game::Message,
-    draw_message_ptr: Option<unsafe extern "C" fn(*const u8)>,
-    is_highlighting: bool,
-    do_dump_animation: bool,
-}
-
-impl ControlPanel {
-    pub const fn new() -> Self {
-        Self {
-            keyboard: input::Keyboard::new(),
-            is_james: false,
-            debug_bone_index: 0,
-            debug_field: game::DebugField::None,
-            selection: ControlSelection::Character,
-            is_enabled: false,
-            max_copy_index: game::MARIA_NUM_BONES - 1,
-            message: game::Message::new(),
-            draw_message_ptr: None,
-            is_highlighting: false,
-            do_dump_animation: false,
-        }
-    }
-
-    pub fn set_draw_message_ptr(&mut self, draw_message_ptr: *const c_void) {
-        self.draw_message_ptr = Some(unsafe { std::mem::transmute(draw_message_ptr) });
-    }
-
-    pub unsafe fn print(&self, data: *const u8) {
-        self.draw_message_ptr.unwrap()(data);
-    }
-
-    pub unsafe fn print_message(&self, msg: &game::Message) {
-        self.print(msg.data());
-    }
-
-    pub unsafe fn print_str(&mut self, text: &str) {
-        self.message.set_message_from_str(text);
-        self.print(self.message.data());
-    }
-
-    pub unsafe fn clear_message(&mut self) {
-        // draw an empty string to clear the text on the screen, then call with a null pointer to
-        // clear the reference to it
-        self.print_str("");
-        self.print(std::ptr::null());
-    }
-
-    pub const fn check_dump_animation(&mut self) -> bool {
-        if self.do_dump_animation {
-            self.do_dump_animation = false;
-            return true;
-        }
-        false
-    }
-
-    pub const fn is_enabled(&self) -> bool {
-        self.is_enabled
-    }
-
-    pub const fn get_settings(&self) -> Option<(bool, usize, game::DebugField, usize, usize)> {
-        if self.is_enabled {
-            Some((self.is_james, self.debug_bone_index, self.debug_field, self.max_copy_index,
-                  if self.is_highlighting {
-                      self.debug_bone_index
-                  } else {
-                      usize::MAX
-                  }
-            ))
-        } else {
-            None
-        }
-    }
-
-    pub const fn num_bones(&self) -> usize {
-        if self.is_james {
-            game::JAMES_NUM_BONES
-        } else {
-            game::MARIA_NUM_BONES
-        }
-    }
-
-    const fn toggle_character(&mut self) {
-        self.is_james = !self.is_james;
-        if self.debug_bone_index >= self.num_bones() {
-            self.debug_bone_index = 0;
-        }
-    }
-
-    pub fn update_settings(&mut self) -> Option<(bool, usize, game::DebugField, usize, usize)> {
-        self.keyboard.update().expect("keyboard state update should not fail");
-
-        if self.keyboard.is_key_down_once(VK_F7) {
-            self.is_enabled = !self.is_enabled;
-            log::debug!("Control panel toggled {}", if self.is_enabled { "on" } else { "off" });
-            if !self.is_enabled {
-                // on disable, clear any message we were displaying
-                unsafe { self.clear_message() };
-            }
-        }
-
-        if !self.is_enabled {
-            return None;
-        }
-
-        if self.keyboard.is_key_down_once(VK_LEFT) {
-            self.selection = self.selection.prev();
-        } else if self.keyboard.is_key_down_once(VK_RIGHT) {
-            self.selection = self.selection.next();
-        } else if self.keyboard.is_key_down_once(VK_UP) {
-            match self.selection {
-                ControlSelection::Character => {
-                    self.toggle_character();
-                }
-                ControlSelection::Bone => {
-                    self.debug_bone_index = (self.debug_bone_index + 1) % self.num_bones();
-                }
-                ControlSelection::MaxCopy => {
-                    self.max_copy_index = (self.max_copy_index + 1) % game::MARIA_NUM_BONES;
-                }
-                ControlSelection::Field => {
-                    self.debug_field = self.debug_field.next();
-                }
-            }
-        } else if self.keyboard.is_key_down_once(VK_DOWN) {
-            match self.selection {
-                ControlSelection::Character => {
-                    self.toggle_character();
-                }
-                ControlSelection::Bone => {
-                    self.debug_bone_index = if self.debug_bone_index > 0 {
-                        self.debug_bone_index - 1
-                    } else {
-                        self.num_bones() - 1
-                    };
-                }
-                ControlSelection::MaxCopy => {
-                    self.max_copy_index = if self.max_copy_index > 0 {
-                        self.max_copy_index - 1
-                    } else {
-                        game::MARIA_NUM_BONES - 1
-                    };
-                }
-                ControlSelection::Field => {
-                    self.debug_field = self.debug_field.prev();
-                }
-            }
-        } else if self.keyboard.is_key_down_once(VK_H) {
-            self.is_highlighting = !self.is_highlighting;
-        } else if self.keyboard.is_key_down_once(VK_K) {
-            self.do_dump_animation = true;
-        }
-
-        self.get_settings()
-    }
-
-    pub fn display(&mut self, debug_text: &str) {
-        if !self.is_enabled {
-            return;
-        }
-
-        self.message.set_message(|builder| {
-            use game::ControlCode;
-
-            if !debug_text.is_empty() {
-                builder.add_text(debug_text);
-                builder.add_control_code(ControlCode::LineBreak);
-            }
-
-            if self.selection == ControlSelection::Character {
-                builder.add_control_code(ControlCode::Blue);
-            }
-
-            builder.add_text(if self.is_james { "Char: J" } else { "Char: M" });
-
-            if self.selection == ControlSelection::Character {
-                builder.add_control_code(ControlCode::White);
-            }
-
-            builder.add_text(" | ");
-
-            if self.selection == ControlSelection::Bone {
-                builder.add_control_code(ControlCode::Blue);
-            }
-
-            builder.add_text(&format!("Bone: {:>2}", self.debug_bone_index));
-
-            if self.selection == ControlSelection::Bone {
-                builder.add_control_code(ControlCode::White);
-            }
-
-            builder.add_text(" | ");
-
-            if self.selection == ControlSelection::MaxCopy {
-                builder.add_control_code(ControlCode::Blue);
-            }
-
-            builder.add_text(&format!("Copy Idx: {:>2}", self.max_copy_index));
-
-            if self.selection == ControlSelection::MaxCopy {
-                builder.add_control_code(ControlCode::White);
-            }
-
-            builder.add_text(" | ");
-
-            if self.selection == ControlSelection::Field {
-                builder.add_control_code(ControlCode::Blue);
-            }
-
-            builder.add_text(&format!("Field: {}", self.debug_field.get_name()));
-        });
-
-        unsafe { self.print_message(&self.message) };
-    }
-}
-
 static mut GLOBAL: PersistentData = PersistentData::new();
-static mut CONTROL_PANEL: ControlPanel = ControlPanel::new();
 static mut CONFIG_INTERFACE: config::UserInterface = config::UserInterface::new(config::Config::new());
-
-unsafe fn is_maria_player(character_id: i16) -> bool {
-    PersistentData::is_player_id(character_id) && GLOBAL.is_player_maria()
-}
 
 unsafe extern "C" fn override_animation_paths() {
     GLOBAL.set_weapon_animations();
@@ -848,10 +562,6 @@ fn main(reason: u32) -> Result<()> {
 
     let [
         Some(tex_address),
-        Some(colt_anim_address),
-        Some(address_set_msg_address),
-        Some(demo_anim_address),
-        Some(anim_source_file_address),
         Some(handgun_model_name_address),
         Some(revolver_model_name_address),
         Some(chainsaw_kg1_name_address),
@@ -860,10 +570,6 @@ fn main(reason: u32) -> Result<()> {
     ] = searcher.find_bytes(
         &[
             ICON_TEX_NAME,
-            COLT_ANIM_NAME.to_bytes(),
-            ADDRESS_SET_MSG,
-            DEMO_ANIM_NAME,
-            ANIM_SOURCE_FILE,
             HANDGUN_MODEL_NAME,
             REVOLVER_MODEL_NAME,
             CHAINSAW_KG1_NAME,
@@ -872,18 +578,14 @@ fn main(reason: u32) -> Result<()> {
         ], Some(PAGE_READONLY), sh2pc)? else {
         bail!("Failed to find read-only data");
     };
-    let colt_anim_address = colt_anim_address as usize;
-    let address_set_msg_address = address_set_msg_address as usize;
-    let demo_anim_address = demo_anim_address as usize;
-    let anim_source_file_address = anim_source_file_address as usize;
     let handgun_model_name_address = handgun_model_name_address as usize;
     let revolver_model_name_address = revolver_model_name_address as usize;
     let chainsaw_kg1_name_address = chainsaw_kg1_name_address as usize;
     let revolver_kg1_name_address = revolver_kg1_name_address as usize;
     let paused_text_address = paused_text_address as usize;
     log::debug!(
-        "Found item menu texture path at {:#08X}, colt animation path at {:#08X}, address set msg at {:#08X}, demo anim address at {:#08X}, anim source file address at {:#08X}, handgun model name at {:#08X}, revolver model name at {:#08X}, chainsaw kg1 name at {:#08X}, revolver kg1 name at {:#08X}, paused text at {:#08X}",
-        tex_address as usize, colt_anim_address, address_set_msg_address, demo_anim_address, anim_source_file_address, handgun_model_name_address, revolver_model_name_address, chainsaw_kg1_name_address, revolver_kg1_name_address, paused_text_address,
+        "Found item menu texture path at {:#08X}, handgun model name at {:#08X}, revolver model name at {:#08X}, chainsaw kg1 name at {:#08X}, revolver kg1 name at {:#08X}, paused text at {:#08X}",
+        tex_address as usize, handgun_model_name_address, revolver_model_name_address, chainsaw_kg1_name_address, revolver_kg1_name_address, paused_text_address,
     );
 
     let mut menu_data: [u8; 16] = [0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 1, 0, 0, 0];
@@ -891,13 +593,9 @@ fn main(reason: u32) -> Result<()> {
     // we already rely on our icon coords game constant being a binary match for the exe's icon
     // coords, so let's just directly use it as our search data as well
     let icon_coords_ptr = game::ICON_COORDS.as_ptr() as *const u8;
-    let icon_coords_buf = unsafe { std::slice::from_raw_parts(icon_coords_ptr, 12) };
 
     let [
         Some(menu_address),
-        Some(icon_coord_address),
-        Some(colt_anim_file_address),
-        Some(demo_anim_file_address),
         Some(handgun_model_file_address),
         Some(revolver_model_file_address),
         Some(chainsaw_kg1_file_address),
@@ -905,7 +603,7 @@ fn main(reason: u32) -> Result<()> {
         Some(menu_text_array_address),
     ] = searcher.find_bytes(
         &[
-            &menu_data, icon_coords_buf, &colt_anim_address.to_le_bytes(), &demo_anim_address.to_le_bytes(), &handgun_model_name_address.to_le_bytes(), &revolver_model_name_address.to_le_bytes(), &chainsaw_kg1_name_address.to_le_bytes(), &revolver_kg1_name_address.to_le_bytes(),
+            &menu_data, &handgun_model_name_address.to_le_bytes(), &revolver_model_name_address.to_le_bytes(), &chainsaw_kg1_name_address.to_le_bytes(), &revolver_kg1_name_address.to_le_bytes(),
             &paused_text_address.to_le_bytes(),
         ],
         Some(PAGE_READWRITE | PAGE_WRITECOPY),
@@ -914,11 +612,8 @@ fn main(reason: u32) -> Result<()> {
         bail!("Failed to find .data values");
     };
     log::debug!(
-        "Found menu data at {:#08X}, icon coords at {:#08X}, Colt anim file at {:#08X}, demo anim file at {:#08X}, handgun model file at {:#08X}, revolver model file at {:#08X}, chainsaw kg1 file at {:#08X}, revolver kg1 file at {:#08X}, menu text array at {:#08X}",
+        "Found menu data at {:#08X}, handgun model file at {:#08X}, revolver model file at {:#08X}, chainsaw kg1 file at {:#08X}, revolver kg1 file at {:#08X}, menu text array at {:#08X}",
         menu_address as usize,
-        icon_coord_address as usize,
-        colt_anim_file_address as usize,
-        demo_anim_file_address as usize,
         handgun_model_file_address as usize,
         revolver_model_file_address as usize,
         chainsaw_kg1_file_address as usize,
@@ -929,12 +624,6 @@ fn main(reason: u32) -> Result<()> {
     // Maria vs James texture check
     let mut tex_ref_data: [u8; 7] = [0x50, 0x68, 0, 0, 0, 0, 0xE8];
     tex_ref_data[2..6].copy_from_slice(&(menu_address as usize).to_le_bytes());
-    // reference to Colt anim when allocating buffers
-    let colt_anim_data = patch::push(colt_anim_file_address as usize);
-    // message about failing to set addresses shortly after calling SetCharacterAddresses
-    let address_set_msg_data = patch::push(address_set_msg_address);
-    // animation referenced near a reference to the player pointer
-    let demo_anim_data = patch::push(demo_anim_file_address as usize);
     // reference to handgun model used to determine weapon model buffer size
     let handgun_model_data = patch::push(handgun_model_file_address as usize);
     // reference to chainsaw shadow used to determine weapon shadow buffer size
@@ -943,38 +632,21 @@ fn main(reason: u32) -> Result<()> {
     let mut menu_text_data: [u8; 5] = [0, 0, 0, 0, 0xEB];
     menu_text_data[..4].copy_from_slice(&(menu_text_array_address as usize).to_le_bytes());
 
-    let source_bytes = anim_source_file_address.to_le_bytes();
-    let anim_source_file_data = [
-        0x68, 0x2B, 0x08, 0x00, 0x00, // push 2091
-        0x68, source_bytes[0], source_bytes[1], source_bytes[2], source_bytes[3], // push <filename>
-    ];
-
     let [
         Some(tex_ref_call_address),
         Some(pause_menu_address),
-        Some(colt_anim_push_address),
-        Some(address_set_msg_push_address),
-        Some(demo_anim_push_address),
-        Some(anim_source_file_push_address),
         Some(handgun_model_push_address),
         Some(chainsaw_kg1_push_address),
         Some(james_icon_draw_loop_address),
         Some(maria_icon_draw_loop_address),
         Some(weapon_assert_address),
         Some(weapon_assert_address2),
-        Some(james_anim_address1),
-        Some(james_anim_address2),
-        Some(animation_offset_func),
-        Some(animation_read_func),
         Some(draw_message_func),
-        Some(hit_animation_func),
         Some(james_action_sounds_address),
         Some(maria_action_sounds_address),
         Some(grunt_sound_call_address),
         Some(sound_parameter_select_address),
         Some(rotate_bone_transform_address),
-        Some(difficulty_selection_address),
-        Some(darken_background_address),
         Some(init_inventory_address),
         Some(after_description_call_address),
         Some(menu_input_loop_address),
@@ -983,29 +655,18 @@ fn main(reason: u32) -> Result<()> {
         &[
             &tex_ref_data,
             &menu_text_data,
-            &colt_anim_data,
-            &address_set_msg_data,
-            &demo_anim_data,
-            &anim_source_file_data,
             &handgun_model_data,
             &chainsaw_kg1_data,
             &JAMES_ICON_DRAW_LOOP,
             &MARIA_ICON_DRAW_LOOP,
             &MARIA_WEAPON_ASSERT,
             &MARIA_WEAPON_ASSERT2,
-            &JAMES_ANIMATION_SIZE1,
-            &JAMES_ANIMATION_SIZE2,
-            &ANIMATION_OFFSET_FUNC,
-            &ANIMATION_READ_FUNC,
             &DRAW_MESSAGE_FUNC,
-            &HIT_ANIMATION_FUNC,
             &JAMES_ACTION_SOUNDS,
             &MARIA_ACTION_SOUNDS,
             &GRUNT_SOUND_CALL,
             &SOUND_PARAMETER_SELECT,
             &ROTATE_BONE_TRANSFORM,
-            &DIFFICULTY_SELECTION,
-            &DRAW_DARKENED_BACKGROUND,
             &INIT_INVENTORY,
             &AFTER_DESCRIPTION_CALL,
             &MENU_INPUT_LOOP,
@@ -1017,25 +678,16 @@ fn main(reason: u32) -> Result<()> {
         bail!("Failed to find code addresses");
     };
     log::debug!(
-        "Found tex ref data at {:#08X}, pause menu at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
-        James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
-        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, difficulty selection at {:#08X}, darkened background at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}, main menu func 1 at {:#08X}",
+        "Found tex ref data at {:#08X}, pause menu at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
+        draw msg call at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
+        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}, main menu func 1 at {:#08X}",
         tex_ref_call_address as usize,
         pause_menu_address as usize,
-        colt_anim_push_address as usize,
-        address_set_msg_push_address as usize,
-        demo_anim_push_address as usize,
-        anim_source_file_push_address as usize,
         james_icon_draw_loop_address as usize,
         maria_icon_draw_loop_address as usize,
         weapon_assert_address as usize,
         weapon_assert_address2 as usize,
-        james_anim_address1 as usize,
-        james_anim_address2 as usize,
-        animation_offset_func as usize,
-        animation_read_func as usize,
         draw_message_func as usize,
-        hit_animation_func as usize,
         james_action_sounds_address as usize,
         maria_action_sounds_address as usize,
         grunt_sound_call_address as usize,
@@ -1043,8 +695,6 @@ fn main(reason: u32) -> Result<()> {
         handgun_model_push_address as usize,
         chainsaw_kg1_push_address as usize,
         rotate_bone_transform_address as usize,
-        difficulty_selection_address as usize,
-        darken_background_address as usize,
         init_inventory_address as usize,
         after_description_call_address as usize,
         menu_input_loop_address as usize,
@@ -1075,24 +725,6 @@ fn main(reason: u32) -> Result<()> {
         let tex_ref_check_address = tex_ref_call_address.offset(-27);
         patch::assert_byte(tex_ref_check_address, 0x75)?; // jnz
 
-        let colt_anim_check_address = colt_anim_push_address.offset(5);
-        patch::assert_byte(colt_anim_check_address, 0xE8)?; // call
-
-        let character_files_check_address = colt_anim_push_address.offset(-217);
-        patch::assert_byte(character_files_check_address, 0xB8)?; // mov
-
-        let character_files_end_check_address = character_files_check_address.offset(14);
-        patch::assert_byte(character_files_end_check_address, 0x3D)?; // cmp
-
-        let address_set_msg_check_address = address_set_msg_push_address.offset(-12);
-        patch::assert_byte(address_set_msg_check_address, 0xE8)?; // call
-
-        let demo_anim_check_address = demo_anim_push_address.offset(27);
-        patch::assert_byte(demo_anim_check_address, 0xA1)?; // mov
-
-        let anim_frame_size_check_address = anim_source_file_push_address.offset(-256);
-        patch::assert_byte(anim_frame_size_check_address, 0xE8)?; // call
-
         let james_action_sounds_switch = james_action_sounds_address.offset(4);
         patch::assert_byte(james_action_sounds_switch, 0x0F)?; // ja
 
@@ -1104,13 +736,6 @@ fn main(reason: u32) -> Result<()> {
 
         let rotate_bone_func_address = rotate_bone_transform_address.offset(-42);
         patch::assert_byte(rotate_bone_func_address, 0x83)?; // sub
-
-        //let difficulty_select_call_address = difficulty_selection_address.offset(-7);
-        let difficulty_select_call_address = difficulty_selection_address.offset(-26);
-        patch::assert_byte(difficulty_select_call_address, 0xE8)?; // call
-
-        let darkened_background_entry_point = darken_background_address.offset(-49);
-        patch::assert_byte(darkened_background_entry_point, 0x51)?; // push
 
         let add_inventory_call_address = init_inventory_address.offset(12);
         patch::assert_byte(add_inventory_call_address, 0xE8)?; // call
@@ -1128,59 +753,41 @@ fn main(reason: u32) -> Result<()> {
         let pause_menu_entry_address = pause_menu_address.offset(-31);
         patch::assert_byte(pause_menu_entry_address, 0xE8)?; // call
 
-        // this allows us to draw a message at a specific spot on the screen
-        let draw_message_positioned_call_address = pause_menu_address.offset(98);
-        patch::assert_byte(draw_message_positioned_call_address, 0xE8)?; // call
-
         let menu_input_loop_start = menu_input_loop_address.offset(-2210); // yikes
         patch::assert_byte(menu_input_loop_start, 0x0F)?; // ja
 
-        let request_file_size_address = patch::get_call_target(colt_anim_check_address) as usize;
-        let set_character_addresses_address = patch::get_call_target(address_set_msg_check_address) as usize;
-        let get_character_frame_size_address = patch::get_call_target(anim_frame_size_check_address) as usize;
         let james_sounds_switch_default = patch::get_conditional_jump_target(james_action_sounds_switch);
         let maria_sounds_switch_default = patch::get_conditional_jump_target(maria_action_sounds_switch);
-        let difficulty_select_original_call = patch::get_call_target(difficulty_select_call_address) as usize;
         let add_item_to_inventory = patch::get_call_target(add_inventory_call_address) as usize;
         let inc_item_count = patch::get_call_target(inc_item_count_address) as usize;
         let description_func = patch::get_call_target(description_call_address) as usize;
-        let draw_message_positioned = patch::get_call_target(draw_message_positioned_call_address) as usize;
         let main_menu_original_call = patch::get_call_target(main_menu_dispatch_func) as usize;
         // make sure the addresses look reasonable
         if !searcher.find_addresses_exec(
             &[
-                request_file_size_address,
-                set_character_addresses_address,
-                get_character_frame_size_address,
                 james_sounds_switch_default as usize,
                 maria_sounds_switch_default as usize,
-                difficulty_select_original_call,
                 add_item_to_inventory,
                 inc_item_count,
                 description_func,
-                draw_message_positioned,
                 main_menu_original_call,
             ],
             sh2pc)?.iter().all(|f| *f) {
             bail!(
-                "One or more of request file size {:#08X}, set character addresses {:#08X}, get character frame size {:#08X}, James sound switch default {:#08X}, Maria sound switch default {:#08X} difficulty select call {:#08X}, add inventory {:#08X}, inc item count {:#08X}, \
-                description func {:#08X}, draw message positioned {:#08X}, main menu original call {:#08X} don't look right",
-                request_file_size_address, set_character_addresses_address, get_character_frame_size_address, james_sounds_switch_default as usize, maria_sounds_switch_default as usize, difficulty_select_original_call, add_item_to_inventory, inc_item_count, description_func,
-                draw_message_positioned, main_menu_original_call,
+                "One or more of James sound switch default {:#08X}, Maria sound switch default {:#08X}, add inventory {:#08X}, inc item count {:#08X}, \
+                description func {:#08X}, main menu original call {:#08X} don't look right",
+                james_sounds_switch_default as usize, maria_sounds_switch_default as usize, add_item_to_inventory, inc_item_count, description_func,
+                main_menu_original_call,
             );
         };
-
-        let get_character_buffers_call_address = (set_character_addresses_address + 0x13) as *const c_void;
-        patch::assert_byte(get_character_buffers_call_address, 0xE8)?; // call
 
         let new_game_plus_flag_call = (add_item_to_inventory + 64) as *const c_void;
         patch::assert_byte(new_game_plus_flag_call, 0xE8)?; // call
 
-        let get_character_buffers_address = patch::get_call_target(get_character_buffers_call_address) as usize;
         let new_game_plus_flag_func = patch::get_call_target(new_game_plus_flag_call) as usize;
         // make sure the addresses look reasonable
-        let [true, true] = searcher.find_addresses_exec(&[get_character_buffers_address, new_game_plus_flag_func], sh2pc)? else {
-            bail!("GetCharacterBuffers() address {:#08X} or SetNewGamePlusFlag() address {:#08X} doesn't look right", get_character_buffers_address, new_game_plus_flag_func);
+        if !searcher.find_addresses_exec(&[new_game_plus_flag_func], sh2pc)?[0] {
+            bail!("SetNewGamePlusFlag() address {:#08X} doesn't look right", new_game_plus_flag_func);
         };
 
         let maria_icon_func_address = maria_icon_draw_loop_address.offset(-16);
@@ -1233,21 +840,16 @@ fn main(reason: u32) -> Result<()> {
         // no point asserting since this is still within our search string
 
         // get pointer to equipped item ID and player character flag
-        let equipped_item_id_address = std::ptr::read_unaligned(weapon_assert_address.offset(-43) as *const *mut i8);
         let player_character_flag_address = std::ptr::read_unaligned(weapon_assert_address.offset(-75) as *const *const u8);
-        let character_files_address = std::ptr::read_unaligned(character_files_check_address.offset(1) as *const *mut game::CharacterFiles);
-        let character_files_end_address = std::ptr::read_unaligned(character_files_end_check_address.offset(1) as *const *mut game::CharacterFiles);
-        let player_ptr_address = std::ptr::read_unaligned(demo_anim_check_address.offset(1) as *const *mut *mut game::Character);
         let sound_param_data_address = std::ptr::read_unaligned(sound_parameter_select_address.offset(-4) as *const *mut u8);
         let inventory_address = std::ptr::read_unaligned(init_inventory_address.offset(8) as *const *mut game::Inventory);
         let main_menu_state_address = std::ptr::read_unaligned(main_menu_dispatch_func.offset(6) as *const *mut i32);
         // make sure the addresses look reasonable
         if !searcher.find_addresses_write(
-            &[equipped_item_id_address as usize, player_character_flag_address as usize, character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize]
+            &[player_character_flag_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize]
             , sh2pc)?.iter().all(|&a| a) {
-            bail!("One or more of the following addresses don't look right: equipped item ID address {:#08X}, player character flag address {:#08X}, character files address {:#08X}, character files end address {:#08X}, player pointer address {:#08X}, sound param data address {:#08X}, \
-            inventory address {:#08X}, main menu state address {:#08X}",
-                equipped_item_id_address as usize, player_character_flag_address as usize,character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize,
+            bail!("One or more of the following addresses don't look right: player character flag address {:#08X}, sound param data address {:#08X}, inventory address {:#08X}, main menu state address {:#08X}",
+                player_character_flag_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize,
             );
         };
 
@@ -1282,13 +884,11 @@ fn main(reason: u32) -> Result<()> {
         let grunt_sound_call = patch::get_call_target(grunt_sound_call_check_address) as usize;
 
         // initialize static data
-        GLOBAL.init(equipped_item_id_address, player_character_flag_address, request_file_size_address,
-            get_character_buffers_address, character_files_address, character_files_end_address,
-            player_ptr_address, get_character_frame_size_address, weapon_data_address, grunt_sound_call,
-            sound_param_data_address, draw_message_func as usize, inc_item_count, add_item_to_inventory,
+        GLOBAL.init(player_character_flag_address,
+            weapon_data_address, grunt_sound_call,
+            sound_param_data_address, inc_item_count, add_item_to_inventory,
             inventory_address, new_game_plus_flag_func, main_menu_state_address)?;
-        CONTROL_PANEL.set_draw_message_ptr(draw_message_func);
-        CONFIG_INTERFACE.set_funcs(draw_message_func as usize, draw_message_positioned);
+        CONFIG_INTERFACE.set_funcs(draw_message_func as usize);
 
         let icon_coords_addr_bytes = (icon_coords_ptr as usize).to_le_bytes();
         let icon_coords_field2_addr_bytes = (icon_coords_ptr.offset(2) as usize).to_le_bytes();
@@ -1436,7 +1036,7 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(rotate_bone_func_address, &rotate_bone_transform_jump)?;
 
         // patch UI for configuration
-        log::info!("Patching configuration UI at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", difficulty_select_call_address as usize, menu_input_loop_start as usize, main_menu_dispatch_func as usize, init_inventory_entry_point as usize);
+        log::info!("Patching configuration UI at addresses {:#08X}, {:#08X}, {:#08X}", menu_input_loop_start as usize, main_menu_dispatch_func as usize, init_inventory_entry_point as usize);
 
         patch::set_trampoline(&mut GLOBAL.main_menu_thunk, 0, main_menu_original_call)?;
         patch::set_trampoline(&mut GLOBAL.main_menu_thunk, 6, main_menu_hook as usize)?;

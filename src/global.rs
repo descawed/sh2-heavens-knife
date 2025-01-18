@@ -20,37 +20,20 @@ struct WeaponAnimationFiles {
 }
 
 pub struct PersistentData {
-    equipped_item_id: *mut i8,
-    pub james_anim_offset_thunk: [u8; 16],
-    pub maria_anim_offset_thunk: [u8; 16],
-    pub anim_read_thunk: [u8; 21],
-    pub after_anim_read_thunk: [u8; 14],
-    pub after_maria_anim_read_thunk: [u8; 17],
-    pub anim_description_change_thunk: [u8; 16],
     pub load_weapon_thunk: [u8; 12],
     pub load_weapon_thunk2: [u8; 12],
     pub james_action_sound_thunk: [u8; 68],
     pub maria_action_sound_thunk: [u8; 63],
     pub rotate_bone_transform_thunk: [u8; 37],
-    pub difficulty_select_thunk: [u8; 20],
     pub item_description_thunk: [u8; 24],
     pub add_item_thunk: [u8; 11],
     pub menu_input_loop_thunk: [u8; 26],
     pub pause_menu_draw_thunk: [u8; 13],
     pub main_menu_thunk: [u8; 22],
-    pub original_animation1: *mut game::AnimationRecord,
-    pub original_animation2: *mut game::AnimationRecord,
     player_character_flag: *const u8,
-    request_file_size: Option<unsafe extern "C" fn(file: *const game::FileInfo) -> usize>,
-    get_character_buffers: Option<unsafe extern "C" fn(character_id: i32) -> *mut game::CharacterBuffers>,
-    get_character_frame_size: Option<unsafe extern "C" fn(character_id: i32) -> usize>,
-    draw_message_ptr: Option<unsafe extern "C" fn(*const u8)>,
     inc_item_count: Option<unsafe extern "C" fn()>,
     add_item_to_inventory: Option<unsafe extern "C" fn(item_id: i32)>,
     set_new_game_plus_item_flag: Option<unsafe extern "C" fn(flag: u32)>,
-    character_files: *mut game::CharacterFiles,
-    character_files_end: *mut game::CharacterFiles,
-    player_ptr: *mut *mut game::Character,
     james_weapon_animations: WeaponAnimationFiles,
     maria_weapon_animations: WeaponAnimationFiles,
     weapon_info: *mut game::WeaponInfo,
@@ -67,78 +50,6 @@ impl PersistentData {
         use crate::game::FileInfo;
 
         Self {
-            equipped_item_id: std::ptr::null_mut(),
-            james_anim_offset_thunk: [
-                0x53, // push ebx
-                0x51, // push ecx
-                0x52, // push edx
-                0x56, // push esi
-                0x57, // push edi
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x5F, // pop edi
-                0x5E, // pop esi
-                0x5A, // pop edx
-                0x59, // pop ecx
-                0x5B, // pop ebx
-                0xC3, // ret
-            ],
-            maria_anim_offset_thunk: [
-                0x53, // push ebx
-                0x51, // push ecx
-                0x52, // push edx
-                0x56, // push esi
-                0x57, // push edi
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x5F, // pop edi
-                0x5E, // pop esi
-                0x5A, // pop edx
-                0x59, // pop ecx
-                0x5B, // pop ebx
-                0xC3, // ret
-            ],
-            anim_read_thunk: [
-                0x53, // push ebx
-                0x51, // push ecx
-                0x52, // push edx
-                0x57, // push edi
-                0x56, // push esi ; esi last because this will be an argument to the function
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x5E, // pop esi
-                0x5F, // pop edi
-                0x5A, // pop edx
-                0x59, // pop ecx
-                0x5B, // pop ebx
-                0x05, 0x00, 0xFF, 0xFF, 0xFF, // add eax, 0xFFFFFF00
-                0xC3, // ret
-            ],
-            after_anim_read_thunk: [
-                0x60, // pushad
-                0x56, // push esi
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x5E, // pop esi
-                0x61, // popad
-                0xE9, 0, 0, 0, 0, // jmp <return>
-            ],
-            after_maria_anim_read_thunk: [
-                0x60, // pushad
-                0x56, // push esi
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x5E, // pop esi
-                0x61, // popad
-                0x83, 0xC4, 0x20, // add esp, 0x20
-                0xE9, 0, 0, 0, 0, // jmp <return>
-            ],
-            anim_description_change_thunk: [
-                0x52, // push edx ; character
-                0x8B, 0x54, 0x24, 0x28, // mov edx, [esp+40]
-                0x52, // push edx ; animation description
-                0x51, // push ecx ; animation
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x59, // pop ecx
-                0x5A, // pop edx
-                0x5A, // pop edx
-                0xC3, // ret
-            ],
             load_weapon_thunk: [
                 0x60, // pushad
                 0xE8, 0, 0, 0, 0, // call <target>
@@ -223,26 +134,6 @@ impl PersistentData {
                 0x89, 0x44, 0x24, 0x60, // mov [esp+0x60], eax
                 0xE9, 0, 0, 0, 0, // jmp <original>
             ],
-            /*difficulty_select_thunk: [
-                0x60, // pushad
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x85, 0xC0, // test eax, eax
-                0x61, // popad
-                0x74, 0x03, // jz original
-                0x31, 0xC0, // xor eax, eax
-                0xC3, // ret
-                0xE9, 0, 0, 0, 0, // original: jmp <original>
-            ],*/
-            difficulty_select_thunk: [
-                0x60, // pushad
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x85, 0xC0, // test eax, eax
-                0x61, // popad
-                0x74, 0x04, // jz original
-                0x83, 0xC4, 0x10, // add esp, 16
-                0xC3, // ret
-                0xE9, 0, 0, 0, 0, // original: jmp <original>
-            ],
             item_description_thunk: [
                 0x8D, 0x44, 0x24, 0x0C,  // lea eax, [esp+12] ; pointer to message ID argument
                 0x50, // push eax
@@ -289,19 +180,10 @@ impl PersistentData {
                 0x31, 0xC0, // xor eax, eax
                 0xC3, // return: ret
             ],
-            original_animation1: std::ptr::null_mut(),
-            original_animation2: std::ptr::null_mut(),
             player_character_flag: std::ptr::null(),
-            request_file_size: None,
-            get_character_buffers: None,
-            get_character_frame_size: None,
-            draw_message_ptr: None,
             inc_item_count: None,
             add_item_to_inventory: None,
             set_new_game_plus_item_flag: None,
-            character_files: std::ptr::null_mut(),
-            character_files_end: std::ptr::null_mut(),
-            player_ptr: std::ptr::null_mut(),
             james_weapon_animations: WeaponAnimationFiles {
                 handgun: FileInfo::new(c"data/chr/jms/jms_wphand.anm"),
                 shotgun: FileInfo::new(c"data/chr/jms/jms_wpshot.anm"),
@@ -336,23 +218,14 @@ impl PersistentData {
         }
     }
 
-    pub fn init(&mut self, equipped_item_id: *mut i8, player_character_flag: *const u8, request_file_size: usize, get_character_buffers: usize,
-            character_files: *mut game::CharacterFiles, character_files_end: *mut game::CharacterFiles, player_ptr: *mut *mut game::Character,
-            get_character_frame_size: usize, weapon_info: *mut game::WeaponInfo, grunt_sound_selector: usize, sound_param_data: *mut u8,
-            draw_message_ptr: usize, inc_item_count: usize, add_item_to_inventory: usize, inventory: *mut game::Inventory,
+    pub fn init(&mut self, player_character_flag: *const u8,
+            weapon_info: *mut game::WeaponInfo, grunt_sound_selector: usize, sound_param_data: *mut u8,
+            inc_item_count: usize, add_item_to_inventory: usize, inventory: *mut game::Inventory,
             set_new_game_plus_item_flag: usize, main_menu_state: *mut i32) -> Result<()> {
-        self.equipped_item_id = equipped_item_id;
         self.player_character_flag = player_character_flag;
-        self.request_file_size = Some(unsafe { std::mem::transmute(request_file_size) });
-        self.get_character_buffers = Some(unsafe { std::mem::transmute(get_character_buffers) });
-        self.get_character_frame_size = Some(unsafe { std::mem::transmute(get_character_frame_size) });
-        self.draw_message_ptr = Some(unsafe { std::mem::transmute(draw_message_ptr) });
         self.inc_item_count = Some(unsafe { std::mem::transmute(inc_item_count) });
         self.add_item_to_inventory = Some(unsafe { std::mem::transmute(add_item_to_inventory) });
         self.set_new_game_plus_item_flag = Some(unsafe { std::mem::transmute(set_new_game_plus_item_flag) });
-        self.character_files = character_files;
-        self.character_files_end = character_files_end;
-        self.player_ptr = player_ptr;
         self.weapon_info = weapon_info;
         self.unk_grunt_sound_value = Some(unsafe { std::mem::transmute(grunt_sound_selector) });
         self.sound_param_data = sound_param_data;
@@ -535,117 +408,7 @@ impl PersistentData {
     }
 
     pub const unsafe fn equipped_item_id(&self) -> i8 {
-        *self.equipped_item_id
-    }
-
-    pub const unsafe fn set_equipped_item(&self, item_id: i8) {
-        *self.equipped_item_id = item_id;
-    }
-
-    pub const unsafe fn is_player_id(id: i16) -> bool {
-        id == game::MARIA_ID || id == game::JAMES_IDS[0] || id == game::JAMES_IDS[1]
-    }
-
-    pub const unsafe fn player(&self) -> *mut game::Character {
-        if self.player_ptr.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let player = *self.player_ptr;
-        let Some(player_ref) = player.as_ref() else {
-            return std::ptr::null_mut();
-        };
-
-        // as a sanity check, make sure our "player" actually has a player character's ID
-        if !Self::is_player_id(player_ref.id) {
-            return std::ptr::null_mut();
-        }
-
-        player
-    }
-
-    pub unsafe fn request_file_size(&self, file: *const game::FileInfo) -> usize {
-        self.request_file_size.unwrap()(file)
-    }
-
-    pub unsafe fn get_character_buffers(&self, character_id: i32) -> *mut game::CharacterBuffers {
-        self.get_character_buffers.unwrap()(character_id)
-    }
-
-    pub unsafe fn get_character_frame_size(&self, character_id: i32) -> usize {
-        self.get_character_frame_size.unwrap()(character_id)
-    }
-
-    pub unsafe fn get_character_files(&self, character_id: i16) -> *mut game::CharacterFiles {
-        let mut file_ptr = self.character_files;
-        while file_ptr < self.character_files_end {
-            let files = file_ptr.as_ref().expect("character files pointer should not be null");
-            if files.character_id == character_id {
-                return file_ptr;
-            }
-
-            file_ptr = file_ptr.offset(1);
-        }
-
-        std::ptr::null_mut()
-    }
-
-    pub unsafe fn get_character_files_by_animation_buffer(&self, animation_buffer: *mut u8) -> *mut game::CharacterFiles {
-        // any unused character file slot or object without an animation will have null buffers,
-        // so we don't want to return bogus results for those
-        if animation_buffer.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let mut file_ptr = self.character_files;
-        while file_ptr < self.character_files_end {
-            let files = file_ptr.as_ref().expect("character files pointer should not be null");
-            if files.animation.buffer == animation_buffer {
-                return file_ptr;
-            }
-
-            file_ptr = file_ptr.offset(1);
-        }
-
-        std::ptr::null_mut()
-    }
-
-    pub unsafe fn get_maria_files(&self) -> *mut game::CharacterFiles {
-        self.get_character_files(game::MARIA_ID)
-    }
-
-    pub unsafe fn get_james_files(&self) -> *mut game::CharacterFiles {
-        let files = self.get_character_files(game::JAMES_IDS[0]);
-        if !files.is_null() {
-            return files;
-        }
-
-        self.get_character_files(game::JAMES_IDS[1])
-    }
-
-    pub unsafe fn get_player_files(&self) -> *mut game::CharacterFiles {
-        // the game can put a James ID on Maria's files when running a James animation and vice
-        // versa, so we'll check for all player IDs regardless of which character the player is,
-        // but we'll check for the expected character first
-        if self.is_player_maria() {
-            let files = self.get_maria_files();
-            if !files.is_null() {
-                return files;
-            }
-
-            self.get_james_files()
-        } else {
-            let files = self.get_james_files();
-            if !files.is_null() {
-                return files;
-            }
-
-            self.get_maria_files()
-        }
-    }
-
-    pub unsafe fn is_james_animation_buffer(&self, animation_buffer: *mut u8) -> bool {
-        self.get_character_files_by_animation_buffer(animation_buffer).as_ref().map(|buf| unsafe { buf.is_using_james_animation() }).unwrap_or(false)
+        (*self.inventory).equipped_item
     }
 
     pub unsafe fn unk_grunt_sound_value(&self) -> i32 {
@@ -658,14 +421,6 @@ impl PersistentData {
 
     pub unsafe fn set_new_game_plus_item_flag(&self, flag: u32) {
         self.set_new_game_plus_item_flag.unwrap()(flag);
-    }
-
-    pub unsafe fn print(&self, data: *const u8) {
-        self.draw_message_ptr.unwrap()(data);
-    }
-
-    pub unsafe fn print_message(&self, msg: &game::Message) {
-        self.print(msg.data());
     }
 
     pub unsafe fn inc_item_count(&self) {
@@ -690,27 +445,6 @@ impl PersistentData {
 
     pub const fn is_item_override_enabled(&self) -> bool {
         self.enable_item_override
-    }
-
-    pub unsafe fn add_item(&self, item_id: i8) {
-        let inventory = self.inventory();
-        if !inventory.has_item(item_id) {
-            self.add_item_to_inventory(item_id);
-        }
-    }
-
-    pub unsafe fn add_item_with_count(&self, item_id: i8, count: u16) {
-        if !game::item_has_count(item_id) {
-            self.add_item(item_id);
-            return;
-        }
-
-        if count == 0 && game::item_count_must_be_nonzero(item_id) {
-            return;
-        }
-
-        self.add_item(item_id);
-        self.inventory().set_count(item_id, count);
     }
 
     pub unsafe fn get_main_menu_state(&self) -> i32 {
