@@ -1,0 +1,39 @@
+# Whether the mod is enabled when it starts up. Options are:
+# "default_off" - The mod is turned off when the game starts and must be enabled from the configuration menu.
+# "remember_last" - The mod will be turned on or off when the game starts based on whether it was on or off last time
+#                   the game was played.
+# "default_on" - The mod is turned on when the game starts, but can be turned off from the configuration menu.
+# "disabled" - The mod is completely disabled - no patches are applied and it cannot be turned on or off within the game.
+startup = "default_off"
+
+# Whether the mod was turned on the last time the game was run. Only relevant when using startup = "remember_last".
+was_enabled_on_last_run = false
+
+# Whether to allow the inventory editor to be used during gameplay. If false, only the starting inventory can be edited
+# just before starting a new game.
+allow_in_game_inventory_editing = true
+
+# How much information to log in the log file. The options, from most to least verbose, are "trace", "debug", "info",
+# "warn", "error", and "off".
+log_level = "info"
+
+# mapping and starting inventory options for James ("Letter from Silent Heaven" scenario)
+[james]
+weapon_ammo_mapping = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+
+# starting inventory for James. default is the great knife scenario.
+[james.starting_inventory]
+equipped_item = 15
+flags = [0x308000, 0, 0]
+# counts only matter for health items, weapons, and ammo; the game doesn't track counts for other items
+counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+# mapping and starting inventory options for Maria ("Born from a Wish" scenario)
+[maria]
+weapon_ammo_mapping = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+
+# starting inventory for Maria. default is the great knife scenario.
+[maria.starting_inventory]
+equipped_item = 10  # Maria must have the revolver equipped to start the game or the game will crash. changes to this setting are ignored.
+flags = [0x8000, 0, 0]
+counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

@@ -740,6 +740,23 @@ impl Inventory {
         self.unk39 = 0;
         self.unk3a = 0;
     }
+
+    pub fn ensure_consistent(&mut self) {
+        if !can_equip_item(self.equipped_item) {
+            self.equipped_item = ITEM_ID_NOTHING;
+        }
+
+        for (i, count) in self.counts.iter_mut().enumerate() {
+            let item_id = i as i8;
+            if *count > get_item_max_count(item_id) {
+                *count = get_item_max_count(item_id);
+            }
+
+            if *count == 0 && item_count_must_be_nonzero(item_id) {
+                self.flags[(item_id as usize) >> 5] &= !(1 << (item_id & 0x1F));
+            }
+        }
+    }
 }
 
 pub const LANGUAGES: &str = "jefgis";

@@ -2,12 +2,12 @@
 
 use std::ffi::{c_void, CStr};
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{Seek, SeekFrom, Write};
 use std::panic;
 use std::path::Path;
 use std::os::windows::fs::FileExt;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use simplelog::{Config, LevelFilter, WriteLogger};
 use windows::Win32::Foundation::{BOOL, HMODULE};
 use windows::Win32::System::Memory::{
@@ -24,6 +24,8 @@ mod global;
 use global::*;
 
 use game::{Mat4, Vec3, Vec4};
+
+const CONFIG_FILENAME: &str = "knife.toml";
 
 // search strings to find the areas we want to patch
 const ICON_TEX_NAME: &[u8] = b"data/pic/etc/itemmenu2.tex\0";
@@ -646,8 +648,19 @@ unsafe extern "C" fn equipped_weapon_transform_override(animation: *const game::
     animation.records.offset(new_index)
 }
 
+unsafe fn save_config() {
+    let config_text = CONFIG_INTERFACE.save_config();
+    let config_path = Path::new(CONFIG_FILENAME);
+    if let Err(e) = File::create(config_path).and_then(|mut file| file.write_all(config_text.as_bytes())) {
+        log::error!("Failed to save config file to {}: {}", CONFIG_FILENAME, e);
+    }
+}
+
 unsafe extern "C" fn difficulty_select_hook() -> u32 {
-    CONFIG_INTERFACE.show(!GLOBAL.is_player_maria(), None);
+    if CONFIG_INTERFACE.show(!GLOBAL.is_player_maria(), None) {
+        save_config();
+    }
+
     if CONFIG_INTERFACE.has_focus() {
         1
     } else {
@@ -760,7 +773,9 @@ unsafe extern "C" fn menu_input_loop_hook(state: u32) -> u32 {
 }
 
 unsafe extern "C" fn pause_menu_draw_hook() -> u32 {
-    CONFIG_INTERFACE.show(!GLOBAL.is_player_maria(), Some(GLOBAL.inventory()));
+    if CONFIG_INTERFACE.show(!GLOBAL.is_player_maria(), Some(GLOBAL.inventory())) {
+        save_config();
+    }
 
     if CONFIG_INTERFACE.has_focus() {
         4 // add 4 bytes to stack to skip the return address and return directly to caller
@@ -769,9 +784,9 @@ unsafe extern "C" fn pause_menu_draw_hook() -> u32 {
     }
 }
 
-fn open_log() -> Result<()> {
-    let log_file = File::create("sh2hvnknf.log")?;
-    WriteLogger::init(LevelFilter::Debug, Config::default(), log_file)?;
+fn open_log(level: LevelFilter) -> Result<()> {
+    let log_file = File::create("knife.log")?;
+    WriteLogger::init(level, Config::default(), log_file)?;
     panic::set_hook(Box::new(|info| {
         let msg = if let Some(msg) = info.payload().downcast_ref::<&str>() {
             *msg
@@ -795,7 +810,23 @@ fn main(reason: u32) -> Result<()> {
         return Ok(());
     }
 
-    open_log()?;
+    let config_path = Path::new(CONFIG_FILENAME);
+    let config_read_result = std::fs::read_to_string(config_path).with_context(|| format!("Failed to read config from {}", CONFIG_FILENAME)).and_then(|s| config::Config::from_text(&s));
+    let log_level = match &config_read_result {
+        Ok(config) => config.log_level(),
+        Err(_) => LevelFilter::Info,
+    };
+
+    open_log(log_level)?;
+
+    // wait until the log is open to propagate a config error
+    let config = config_read_result?;
+    if config.is_disabled() {
+        // log as an error to make sure it shows up (unless the user has disabled logging entirely)
+        log::error!("Heaven's Knife is disabled; exiting.");
+        log::error!("Note: to re-enable the mod, open {} in a text editor and change the line\n\tstartup = \"disabled\"\nto\n\tstartup = \"default_off\"", CONFIG_FILENAME);
+        return Ok(());
+    }
 
     log::debug!("Searching for patch locations");
 
@@ -1008,6 +1039,8 @@ fn main(reason: u32) -> Result<()> {
     );
 
     unsafe {
+        CONFIG_INTERFACE.set_config(config);
+
         // sanity checks
         let tex_ref_check_address = tex_ref_call_address.offset(-27);
         patch::assert_byte(tex_ref_check_address, 0x75)?; // jnz
@@ -1221,7 +1254,7 @@ fn main(reason: u32) -> Result<()> {
             sound_param_data_address, draw_message_func as usize, inc_item_count, add_item_to_inventory,
             inventory_address, new_game_plus_flag_func).expect("initialization should not fail");
         CONTROL_PANEL.set_draw_message_ptr(draw_message_func);
-        CONFIG_INTERFACE.set_funcs(draw_message_func as usize, darkened_background_entry_point as usize, draw_message_positioned);
+        CONFIG_INTERFACE.set_funcs(draw_message_func as usize, draw_message_positioned);
 
         let icon_coords_addr_bytes = (icon_coords_ptr as usize).to_le_bytes();
         let icon_coords_field2_addr_bytes = (icon_coords_ptr.offset(2) as usize).to_le_bytes();
