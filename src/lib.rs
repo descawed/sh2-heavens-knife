@@ -87,9 +87,9 @@ const SOUND_PARAMETER_SELECT: [u8; 6] = [
 const ROTATE_BONE_TRANSFORM: [u8; 10] = [
     0x89, 0x5D, 0x38, 0x89, 0x5D, 0x3C, 0x89, 0x5D, 0x40, 0xE8,
 ];
-/*const DIFFICULTY_SELECTION: [u8; 7] = [
-    0x03, 0x0F, 0x87, 0xE6, 0x01, 0x00, 0x00,
-];*/
+const MAIN_MENU_FUNC1: [u8; 5] = [
+    0x00, 0x00, 0x70, 0x42, 0xB9,
+];
 const DIFFICULTY_SELECTION: [u8; 10] = [
     0x68, 0x3C, 0xFF, 0xFF, 0xFF, 0xBF, 0x05, 0x00, 0x00, 0x00,
 ];
@@ -656,15 +656,25 @@ unsafe fn save_config() {
     }
 }
 
-unsafe extern "C" fn difficulty_select_hook() -> u32 {
-    if CONFIG_INTERFACE.show(!GLOBAL.is_player_maria(), None) {
+// return 0 to trigger skipping main menu draw
+unsafe extern "C" fn main_menu_hook() -> u32 {
+    let main_menu_state = GLOBAL.get_main_menu_state();
+    // only run on main menu, scenario select, or difficulty select
+    if !matches!(main_menu_state, 2 | 3 | 4) {
+        return 1;
+    }
+
+    // we can only rely on this flag once we've chosen our scenario and we're waiting to choose the
+    // difficulty, which is state 4
+    let is_james = (main_menu_state == 4).then(|| !GLOBAL.is_player_maria());
+    if CONFIG_INTERFACE.show(is_james, None) {
         save_config();
     }
 
     if CONFIG_INTERFACE.has_focus() {
-        1
-    } else {
         0
+    } else {
+        1
     }
 }
 
@@ -773,7 +783,7 @@ unsafe extern "C" fn menu_input_loop_hook(state: u32) -> u32 {
 }
 
 unsafe extern "C" fn pause_menu_draw_hook() -> u32 {
-    if CONFIG_INTERFACE.show(!GLOBAL.is_player_maria(), Some(GLOBAL.inventory())) {
+    if CONFIG_INTERFACE.show(Some(!GLOBAL.is_player_maria()), Some(GLOBAL.inventory())) {
         save_config();
     }
 
@@ -968,6 +978,7 @@ fn main(reason: u32) -> Result<()> {
         Some(init_inventory_address),
         Some(after_description_call_address),
         Some(menu_input_loop_address),
+        Some(main_menu_func1_address),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
@@ -998,6 +1009,7 @@ fn main(reason: u32) -> Result<()> {
             &INIT_INVENTORY,
             &AFTER_DESCRIPTION_CALL,
             &MENU_INPUT_LOOP,
+            &MAIN_MENU_FUNC1,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -1007,7 +1019,7 @@ fn main(reason: u32) -> Result<()> {
     log::debug!(
         "Found tex ref data at {:#08X}, pause menu at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
         James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
-        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, difficulty selection at {:#08X}, darkened background at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}",
+        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, difficulty selection at {:#08X}, darkened background at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}, main menu func 1 at {:#08X}",
         tex_ref_call_address as usize,
         pause_menu_address as usize,
         colt_anim_push_address as usize,
@@ -1036,12 +1048,30 @@ fn main(reason: u32) -> Result<()> {
         init_inventory_address as usize,
         after_description_call_address as usize,
         menu_input_loop_address as usize,
+        main_menu_func1_address as usize,
     );
 
     unsafe {
         CONFIG_INTERFACE.set_config(config);
 
+        // we need to find the main menu loop so we can patch in our configuration menu option
+        let main_menu_func1_entry_point = main_menu_func1_address.offset(-104);
+        patch::assert_byte(main_menu_func1_entry_point, 0x56)?; // push
+
+        let [Some(main_menu_func1_ref_address)] = searcher.find_bytes(&[&(main_menu_func1_entry_point as usize).to_le_bytes()], Some(PAGE_READWRITE | PAGE_WRITECOPY), sh2pc)? else {
+            bail!("Failed to find reference to main menu func 1 {:#08X}", main_menu_func1_entry_point as usize);
+        };
+
+        let [Some(main_menu_dynamic_dispatch_address)] = searcher.find_bytes(&[&(main_menu_func1_ref_address as usize).to_le_bytes()], Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE), sh2pc)? else {
+            bail!("Failed to find dynamic dispatch address for main menu func 1 {:#08X}", main_menu_func1_ref_address as usize);
+        };
+
         // sanity checks
+
+        // we'll patch here to show our UI on the main menu
+        let main_menu_dispatch_func = main_menu_dynamic_dispatch_address.offset(-13);
+        patch::assert_byte(main_menu_dispatch_func, 0xE8)?; // call
+
         let tex_ref_check_address = tex_ref_call_address.offset(-27);
         patch::assert_byte(tex_ref_check_address, 0x75)?; // jnz
 
@@ -1115,6 +1145,7 @@ fn main(reason: u32) -> Result<()> {
         let inc_item_count = patch::get_call_target(inc_item_count_address) as usize;
         let description_func = patch::get_call_target(description_call_address) as usize;
         let draw_message_positioned = patch::get_call_target(draw_message_positioned_call_address) as usize;
+        let main_menu_original_call = patch::get_call_target(main_menu_dispatch_func) as usize;
         // make sure the addresses look reasonable
         if !searcher.find_addresses_exec(
             &[
@@ -1128,13 +1159,14 @@ fn main(reason: u32) -> Result<()> {
                 inc_item_count,
                 description_func,
                 draw_message_positioned,
+                main_menu_original_call,
             ],
             sh2pc)?.iter().all(|f| *f) {
             bail!(
                 "One or more of request file size {:#08X}, set character addresses {:#08X}, get character frame size {:#08X}, James sound switch default {:#08X}, Maria sound switch default {:#08X} difficulty select call {:#08X}, add inventory {:#08X}, inc item count {:#08X}, \
-                description func {:#08X}, draw message positioned {:#08X} don't look right",
+                description func {:#08X}, draw message positioned {:#08X}, main menu original call {:#08X} don't look right",
                 request_file_size_address, set_character_addresses_address, get_character_frame_size_address, james_sounds_switch_default as usize, maria_sounds_switch_default as usize, difficulty_select_original_call, add_item_to_inventory, inc_item_count, description_func,
-                draw_message_positioned,
+                draw_message_positioned, main_menu_original_call,
             );
         };
 
@@ -1208,12 +1240,14 @@ fn main(reason: u32) -> Result<()> {
         let player_ptr_address = std::ptr::read_unaligned(demo_anim_check_address.offset(1) as *const *mut *mut game::Character);
         let sound_param_data_address = std::ptr::read_unaligned(sound_parameter_select_address.offset(-4) as *const *mut u8);
         let inventory_address = std::ptr::read_unaligned(init_inventory_address.offset(8) as *const *mut game::Inventory);
+        let main_menu_state_address = std::ptr::read_unaligned(main_menu_dispatch_func.offset(6) as *const *mut i32);
         // make sure the addresses look reasonable
         if !searcher.find_addresses_write(
-            &[equipped_item_id_address as usize, player_character_flag_address as usize, character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize, inventory_address as usize]
+            &[equipped_item_id_address as usize, player_character_flag_address as usize, character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize]
             , sh2pc)?.iter().all(|&a| a) {
-            bail!("One or more of the following addresses don't look right: equipped item ID address {:#08X}, player character flag address {:#08X}, character files address {:#08X}, character files end address {:#08X}, player pointer address {:#08X}, sound param data address {:#08X}, inventory address {:#08X}",
-                equipped_item_id_address as usize, player_character_flag_address as usize,character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize, inventory_address as usize,
+            bail!("One or more of the following addresses don't look right: equipped item ID address {:#08X}, player character flag address {:#08X}, character files address {:#08X}, character files end address {:#08X}, player pointer address {:#08X}, sound param data address {:#08X}, \
+            inventory address {:#08X}, main menu state address {:#08X}",
+                equipped_item_id_address as usize, player_character_flag_address as usize,character_files_address as usize, character_files_end_address as usize, player_ptr_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize,
             );
         };
 
@@ -1252,7 +1286,7 @@ fn main(reason: u32) -> Result<()> {
             get_character_buffers_address, character_files_address, character_files_end_address,
             player_ptr_address, get_character_frame_size_address, weapon_data_address, grunt_sound_call,
             sound_param_data_address, draw_message_func as usize, inc_item_count, add_item_to_inventory,
-            inventory_address, new_game_plus_flag_func).expect("initialization should not fail");
+            inventory_address, new_game_plus_flag_func, main_menu_state_address)?;
         CONTROL_PANEL.set_draw_message_ptr(draw_message_func);
         CONFIG_INTERFACE.set_funcs(draw_message_func as usize, draw_message_positioned);
 
@@ -1402,12 +1436,11 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(rotate_bone_func_address, &rotate_bone_transform_jump)?;
 
         // patch UI for configuration
-        log::info!("Patching configuration UI at addresses {:#08X}, {:#08X}", difficulty_select_call_address as usize, menu_input_loop_start as usize);
+        log::info!("Patching configuration UI at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", difficulty_select_call_address as usize, menu_input_loop_start as usize, main_menu_dispatch_func as usize, init_inventory_entry_point as usize);
 
-        patch::set_trampoline(&mut GLOBAL.difficulty_select_thunk, 1, difficulty_select_hook as usize)?;
-        patch::set_trampoline(&mut GLOBAL.difficulty_select_thunk, 15, difficulty_select_original_call)?;
-        let difficulty_select_call = patch::call(difficulty_select_call_address as usize, &raw const GLOBAL.difficulty_select_thunk as usize);
-        patch::patch(difficulty_select_call_address, &difficulty_select_call)?;
+        patch::set_trampoline(&mut GLOBAL.main_menu_thunk, 0, main_menu_original_call)?;
+        patch::set_trampoline(&mut GLOBAL.main_menu_thunk, 6, main_menu_hook as usize)?;
+        patch::patch(main_menu_dispatch_func, &patch::call(main_menu_dispatch_func as usize, &raw const GLOBAL.main_menu_thunk as usize))?;
 
         // don't let the game listen for input while we're in one of our own menus
         let menu_input_loop_default = patch::get_conditional_jump_target(menu_input_loop_start);

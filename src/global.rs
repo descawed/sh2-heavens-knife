@@ -37,6 +37,7 @@ pub struct PersistentData {
     pub add_item_thunk: [u8; 11],
     pub menu_input_loop_thunk: [u8; 26],
     pub pause_menu_draw_thunk: [u8; 13],
+    pub main_menu_thunk: [u8; 22],
     pub original_animation1: *mut game::AnimationRecord,
     pub original_animation2: *mut game::AnimationRecord,
     player_character_flag: *const u8,
@@ -56,6 +57,7 @@ pub struct PersistentData {
     unk_grunt_sound_value: Option<unsafe extern "C" fn() -> i32>,
     sound_param_data: *mut u8,
     inventory: *mut game::Inventory,
+    main_menu_state: *mut i32,
     item_messages: [game::MessageFile; game::NUM_LANGUAGES],
     enable_item_override: bool,
 }
@@ -276,6 +278,17 @@ impl PersistentData {
                 0x01, 0xC4, // add esp, eax ; if we want to skip drawing of the menu, we'll return 4
                 0xC3, // ret
             ],
+            main_menu_thunk: [
+                0xE8, 0, 0, 0, 0, // call <original>
+                0x60, // pushad
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x85, 0xC0, // test eax, eax
+                0x61, // popad
+                0x75, 0x05, // jnz return
+                0x83, 0xC4, 0x04, // add esp, 4
+                0x31, 0xC0, // xor eax, eax
+                0xC3, // return: ret
+            ],
             original_animation1: std::ptr::null_mut(),
             original_animation2: std::ptr::null_mut(),
             player_character_flag: std::ptr::null(),
@@ -317,6 +330,7 @@ impl PersistentData {
             unk_grunt_sound_value: None,
             sound_param_data: std::ptr::null_mut(),
             inventory: std::ptr::null_mut(),
+            main_menu_state: std::ptr::null_mut(),
             item_messages: [const { game::MessageFile::new() }; game::NUM_LANGUAGES],
             enable_item_override: true,
         }
@@ -326,7 +340,7 @@ impl PersistentData {
             character_files: *mut game::CharacterFiles, character_files_end: *mut game::CharacterFiles, player_ptr: *mut *mut game::Character,
             get_character_frame_size: usize, weapon_info: *mut game::WeaponInfo, grunt_sound_selector: usize, sound_param_data: *mut u8,
             draw_message_ptr: usize, inc_item_count: usize, add_item_to_inventory: usize, inventory: *mut game::Inventory,
-            set_new_game_plus_item_flag: usize) -> Result<()> {
+            set_new_game_plus_item_flag: usize, main_menu_state: *mut i32) -> Result<()> {
         self.equipped_item_id = equipped_item_id;
         self.player_character_flag = player_character_flag;
         self.request_file_size = Some(unsafe { std::mem::transmute(request_file_size) });
@@ -343,6 +357,7 @@ impl PersistentData {
         self.unk_grunt_sound_value = Some(unsafe { std::mem::transmute(grunt_sound_selector) });
         self.sound_param_data = sound_param_data;
         self.inventory = inventory;
+        self.main_menu_state = main_menu_state;
 
         self.load_item_messages()
     }
@@ -684,5 +699,9 @@ impl PersistentData {
 
         self.add_item(item_id);
         self.inventory().set_count(item_id, count);
+    }
+
+    pub unsafe fn get_main_menu_state(&self) -> i32 {
+        *self.main_menu_state
     }
 }

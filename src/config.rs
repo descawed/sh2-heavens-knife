@@ -270,6 +270,7 @@ impl Config {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MainMenuOption {
     Enable,
+    Character,
     InventoryEditor,
     ItemMapper,
     Settings,
@@ -280,7 +281,8 @@ impl MainMenuOption {
     pub const fn previous(&self) -> Self {
         match self {
             Self::Enable => Self::Exit,
-            Self::InventoryEditor => Self::Enable,
+            Self::Character => Self::Enable,
+            Self::InventoryEditor => Self::Character,
             Self::ItemMapper => Self::InventoryEditor,
             Self::Settings => Self::ItemMapper,
             Self::Exit => Self::Settings,
@@ -289,7 +291,8 @@ impl MainMenuOption {
 
     pub const fn next(&self) -> Self {
         match self {
-            Self::Enable => Self::InventoryEditor,
+            Self::Enable => Self::Character,
+            Self::Character => Self::InventoryEditor,
             Self::InventoryEditor => Self::ItemMapper,
             Self::ItemMapper => Self::Settings,
             Self::Settings => Self::Exit,
@@ -455,6 +458,7 @@ pub struct UserInterface {
     state: State,
     keyboard: input::Keyboard,
     original_inventory_editor_setting: bool,
+    is_james_selected: bool,
 }
 
 impl UserInterface {
@@ -468,6 +472,7 @@ impl UserInterface {
             state: State::StatusIndicator,
             keyboard: input::Keyboard::new(),
             original_inventory_editor_setting,
+            is_james_selected: true,
         }
     }
 
@@ -524,7 +529,8 @@ impl UserInterface {
     ///
     /// # Arguments
     ///
-    /// * `is_james` - Are we James? Controls which scenario's settings are shown.
+    /// * `is_james` - Are we James? Controls which scenario's settings are shown. May be None while
+    ///                at the main menu.
     /// * `live_inventory` - If we're in-game, as opposed to on the main menu, use this to pass the
     ///                      player's current inventory.
     ///
@@ -532,16 +538,26 @@ impl UserInterface {
     ///
     /// A boolean indicating whether the UI was just closed. This can be used a signal to trigger
     /// a save of the configuration.
-    pub fn show(&mut self, is_james: bool, live_inventory: Option<&mut game::Inventory>) -> bool {
+    pub fn show(&mut self, is_james: Option<bool>, live_inventory: Option<&mut game::Inventory>) -> bool {
         use crate::game::ControlCode;
 
         self.keyboard.update().expect("keyboard state update should not fail");
 
-        let is_maria_scenario_start = !is_james && live_inventory.is_none();
         // if we have live inventory, we're in-game, so we must be at the pause menu. otherwise,
         // we're at the difficulty selection screen prior to starting a new game.
         let is_in_game = live_inventory.is_some();
-        let inventory = live_inventory.unwrap_or_else(|| if is_james {
+
+        // if we haven't shown the menu yet and we have a specific character, override the last
+        // character selection with the given character. or, if we're in-game, we always use the
+        // player character.
+        if let Some(is_james) = is_james {
+            if self.state == State::StatusIndicator || is_in_game {
+                self.is_james_selected = is_james;
+            }
+        }
+
+        let is_maria_scenario_start = !self.is_james_selected && live_inventory.is_none();
+        let inventory = live_inventory.unwrap_or_else(|| if self.is_james_selected {
             &mut self.config.james_starting_inventory
         } else {
             &mut self.config.maria_starting_inventory
@@ -564,13 +580,13 @@ impl UserInterface {
                     was_closed = true;
                 } else if self.keyboard.is_any_key_down_once(&[VK_UP, VK_W]) {
                     let mut previous_option = option.previous();
-                    if previous_option == MainMenuOption::InventoryEditor && !can_change_inventory_editor_setting {
+                    while (previous_option == MainMenuOption::InventoryEditor && !can_change_inventory_editor_setting) || (previous_option == MainMenuOption::Character && is_in_game) {
                         previous_option = previous_option.previous();
                     }
                     self.state = State::MainMenu(previous_option);
                 } else if self.keyboard.is_any_key_down_once(&[VK_DOWN, VK_S]) {
                     let mut next_option = option.next();
-                    if next_option == MainMenuOption::InventoryEditor && !can_change_inventory_editor_setting {
+                    while (next_option == MainMenuOption::InventoryEditor && !can_change_inventory_editor_setting) || (next_option == MainMenuOption::Character && is_in_game) {
                         next_option = next_option.next();
                     }
                     self.state = State::MainMenu(next_option);
@@ -579,6 +595,11 @@ impl UserInterface {
                         MainMenuOption::Enable => {
                             if self.keyboard.is_any_key_down_once(&[VK_RETURN, VK_SPACE, VK_LEFT, VK_RIGHT, VK_A, VK_D]) {
                                 self.config.is_enabled = !self.config.is_enabled;
+                            }
+                        }
+                        MainMenuOption::Character => {
+                            if self.keyboard.is_any_key_down_once(&[VK_RETURN, VK_SPACE, VK_LEFT, VK_RIGHT, VK_A, VK_D]) {
+                                self.is_james_selected = !self.is_james_selected;
                             }
                         }
                         MainMenuOption::InventoryEditor => {
@@ -659,7 +680,7 @@ impl UserInterface {
                 }
             }
             State::ItemMapper(option) => {
-                let mapping = if is_james {
+                let mapping = if self.is_james_selected {
                     &mut self.config.james_weapon_ammo_mapping
                 } else {
                     &mut self.config.maria_weapon_ammo_mapping
@@ -753,8 +774,8 @@ impl UserInterface {
         match self.state {
             State::StatusIndicator => {
                 self.message.set_message(|builder| {
-                    // newlines to make sure the text is drawn under the difficulty selection
-                    builder.add_text("\n\nHeaven's Knife: ");
+                    // newlines to make sure the text is drawn under other menu options
+                    builder.add_text("\n\n\n\nHeaven's Knife: ");
                     Self::draw_toggle(self.config.is_enabled, builder);
                     builder.add_control_code(ControlCode::White);
                     builder.add_text(" (press F7 to configure)");
@@ -770,6 +791,23 @@ impl UserInterface {
                     builder.add_control_code(ControlCode::White);
                     builder.add_control_code(ControlCode::LineBreak);
 
+                    // only show the character select when we're not in-game. once we're in-game,
+                    // we're always working with the player character
+                    if !is_in_game {
+                        if option == MainMenuOption::Character {
+                            builder.add_control_code(ControlCode::Blue);
+                        }
+                        builder.add_text("Character: ");
+                        builder.add_control_code(ControlCode::White);
+                        builder.add_text(if self.is_james_selected {
+                            "James"
+                        } else {
+                            "Maria"
+                        });
+                        builder.add_control_code(ControlCode::LineBreak);
+                    }
+
+                    // indent the next two options under the character select if we're displaying it
                     if option == MainMenuOption::InventoryEditor {
                         builder.add_control_code(ControlCode::Blue);
                     } else if !can_change_inventory_editor_setting {
@@ -778,7 +816,7 @@ impl UserInterface {
                     builder.add_text(if is_in_game {
                         "Edit inventory"
                     } else {
-                        "Edit starting inventory"
+                        "  Edit starting inventory"
                     });
                     builder.add_control_code(ControlCode::White);
                     builder.add_control_code(ControlCode::LineBreak);
@@ -786,7 +824,11 @@ impl UserInterface {
                     if option == MainMenuOption::ItemMapper {
                         builder.add_control_code(ControlCode::Blue);
                     }
-                    builder.add_text("Edit item mappings");
+                    builder.add_text(if is_in_game {
+                        "Edit item mappings"
+                    } else {
+                        "  Edit item mappings"
+                    });
                     builder.add_control_code(ControlCode::White);
                     builder.add_control_code(ControlCode::LineBreak);
 
@@ -864,7 +906,7 @@ impl UserInterface {
             }
             State::ItemMapper(selected_option) => {
                 self.message.set_message(|builder| {
-                    let mapping = if is_james {
+                    let mapping = if self.is_james_selected {
                         &mut self.config.james_weapon_ammo_mapping
                     } else {
                         &mut self.config.maria_weapon_ammo_mapping
@@ -963,11 +1005,7 @@ impl UserInterface {
             }
         }
 
-        if is_in_game && self.state == State::StatusIndicator {
-            self.print_message_positioned(&self.message, 260, 400);
-        } else {
-            self.print_message(&self.message);
-        }
+        self.print_message(&self.message);
 
         was_closed
     }

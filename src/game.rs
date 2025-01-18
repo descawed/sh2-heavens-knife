@@ -698,7 +698,9 @@ impl Inventory {
             let index = item_id as usize;
             if index < self.counts.len() {
                 self.counts[index] = count;
-                self.add_item(item_id);
+                if count > 0 {
+                    self.add_item(item_id);
+                }
             }
         }
     }
@@ -1326,5 +1328,30 @@ mod tests {
     #[test]
     fn override_animation_size() {
         assert!(MARIA_BYTES_FOR_JAMES_ANIM + MARIA_HIT_REACTIONS_ANIM_SIZE > MARIA_WEAPON_ANIM_SIZE);
+    }
+
+    #[test]
+    fn remove_inventory_item() {
+        let mut inventory = Inventory {
+            flags: [32784, 0, 0],
+            counts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            unk26: 0,
+            unk27: 0,
+            unk28: 0,
+            equipped_item: 10,
+            unk2a: 0,
+            unk2c: 0.0,
+            unk30: 0,
+            unk32: 0,
+            unk34: 0,
+            unk36: 0,
+            active_weapon_item: 0,
+            unk39: 0,
+            unk3a: 0,
+        };
+
+        assert!(inventory.has_item(ITEM_ID_HANDGUN));
+        inventory.remove_item(ITEM_ID_HANDGUN);
+        assert!(!inventory.has_item(ITEM_ID_HANDGUN));
     }
 }
