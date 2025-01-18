@@ -641,6 +641,9 @@ impl Inventory {
     }
 }
 
+pub const LANGUAGES: &str = "jefgis";
+pub const NUM_LANGUAGES: usize = LANGUAGES.len();
+
 pub const JAMES_SKELETON: [i8; 41] = [
     -1,
     -1,
@@ -929,6 +932,10 @@ pub const ITEM_NAMES: [&'static str; NUM_USABLE_ITEMS] = [
     "Birthday card and present",
     "White liquid",
 ];
+
+pub const fn item_name(item_id: i8) -> &'static str {
+    ITEM_NAMES[item_id as usize]
+}
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),

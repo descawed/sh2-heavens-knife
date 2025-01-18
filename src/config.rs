@@ -154,9 +154,16 @@ impl Inventory {
 }
 
 #[derive(Debug, Clone)]
+pub struct ScenarioConfig {
+    weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
+    starting_inventory: Inventory,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     is_enabled: bool,
-    weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
+    james_weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
+    maria_weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
     james_starting_inventory: Inventory,
     maria_starting_inventory: Inventory,
 }
@@ -165,7 +172,23 @@ impl Config {
     pub const fn new() -> Self {
         let mut this = Self {
             is_enabled: false,
-            weapon_ammo_mapping: [
+            james_weapon_ammo_mapping: [
+                game::ITEM_ID_HANDGUN,
+                game::ITEM_ID_HANDGUN_BULLETS,
+                game::ITEM_ID_SHOTGUN,
+                game::ITEM_ID_SHOTGUN_SHELLS,
+                game::ITEM_ID_RIFLE,
+                game::ITEM_ID_RIFLE_SHELLS,
+                game::ITEM_ID_REVOLVER,
+                game::ITEM_ID_REVOLVER_BULLETS,
+                game::ITEM_ID_HYPER_SPRAY,
+                game::ITEM_ID_WOODEN_PLANK,
+                game::ITEM_ID_STEEL_PIPE,
+                game::ITEM_ID_GREAT_KNIFE,
+                game::ITEM_ID_CHAINSAW,
+                game::ITEM_ID_CLEAVER,
+            ],
+            maria_weapon_ammo_mapping: [
                 game::ITEM_ID_HANDGUN,
                 game::ITEM_ID_HANDGUN_BULLETS,
                 game::ITEM_ID_SHOTGUN,
@@ -532,6 +555,12 @@ impl UserInterface {
                 }
             }
             State::ItemMapper(option) => {
+                let mapping = if is_james {
+                    &mut self.config.james_weapon_ammo_mapping
+                } else {
+                    &mut self.config.maria_weapon_ammo_mapping
+                };
+
                 if self.keyboard.is_key_down_once(VK_F7) {
                     self.state = State::StatusIndicator;
                 } else if self.keyboard.is_key_down_once(VK_ESCAPE) {
@@ -546,7 +575,7 @@ impl UserInterface {
                     }
                 } else {
                     let index = (option.item_id() - game::ITEM_ID_HANDGUN) as usize;
-                    let mut selected_mapping = self.config.weapon_ammo_mapping[index];
+                    let mut selected_mapping = mapping[index];
                     if self.keyboard.is_any_key_down_once(&[VK_LEFT, VK_A]) {
                         selected_mapping -= 1;
                         if selected_mapping <= game::ITEM_ID_NONE {
@@ -554,7 +583,7 @@ impl UserInterface {
                         } else if selected_mapping < game::ITEM_ID_HANDGUN {
                             selected_mapping = game::ITEM_ID_NONE;
                         }
-                        self.config.weapon_ammo_mapping[index] = selected_mapping;
+                        mapping[index] = selected_mapping;
                     } else if self.keyboard.is_any_key_down_once(&[VK_RIGHT, VK_D]) {
                         selected_mapping += 1;
                         if selected_mapping > game::ITEM_ID_CLEAVER {
@@ -562,7 +591,7 @@ impl UserInterface {
                         } else if selected_mapping < game::ITEM_ID_HANDGUN {
                             selected_mapping = game::ITEM_ID_HANDGUN;
                         }
-                        self.config.weapon_ammo_mapping[index] = selected_mapping;
+                        mapping[index] = selected_mapping;
                     }
                 }
             }
@@ -675,7 +704,13 @@ impl UserInterface {
             }
             State::ItemMapper(selected_option) => {
                 self.message.set_message(|builder| {
-                    for (i, &mapped_item) in self.config.weapon_ammo_mapping.iter().enumerate() {
+                    let mapping = if is_james {
+                        &mut self.config.james_weapon_ammo_mapping
+                    } else {
+                        &mut self.config.maria_weapon_ammo_mapping
+                    };
+
+                    for (i, &mapped_item) in mapping.iter().enumerate() {
                         let option = ItemMapperOption::from_item_id((i as i8) + game::ITEM_ID_HANDGUN);
                         if option == selected_option {
                             builder.add_control_code(ControlCode::Blue);
@@ -743,5 +778,24 @@ impl UserInterface {
         } else {
             None
         }
+    }
+
+    pub fn map_item(&self, item_id: i8, is_james: bool) -> i8 {
+        // we only do mapping for weapons and ammo
+        if !self.config.is_enabled || item_id < game::ITEM_ID_HANDGUN || item_id > game::ITEM_ID_CLEAVER {
+            return item_id;
+        }
+
+        let mapping = if is_james {
+            &self.config.james_weapon_ammo_mapping
+        } else {
+            &self.config.maria_weapon_ammo_mapping
+        };
+
+        mapping[(item_id - game::ITEM_ID_HANDGUN) as usize]
+    }
+
+    pub const fn is_enabled(&self) -> bool {
+        self.config.is_enabled
     }
 }

@@ -96,7 +96,11 @@ const DRAW_DARKENED_BACKGROUND: [u8; 5] = [
 const INIT_INVENTORY: [u8; 7] = [
     0x00, 0x00, 0x10, 0x00, 0x6A, 0x15, 0x89,
 ];
-
+// there are two occurrences of this pattern, but they both come immediately after a call to the
+// function we're trying to intercept
+const AFTER_DESCRIPTION_CALL: [u8; 12] = [
+    0x6A, 0x00, 0x68, 0x00, 0x00, 0x80, 0x3F, 0x68, 0x21, 0x2B, 0x00, 0x00,
+];
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ControlSelection {
@@ -648,6 +652,9 @@ unsafe extern "C" fn difficulty_select_hook() -> u32 {
 }
 
 unsafe extern "C" fn init_inventory_hook() {
+    // don't override the items that we add ourselves
+    GLOBAL.disable_item_override();
+
     let inventory = GLOBAL.inventory();
     inventory.clear();
 
@@ -657,11 +664,16 @@ unsafe extern "C" fn init_inventory_hook() {
             for (item_id, count) in starting_inventory.iter_items() {
                 if let Some(count) = count {
                     // we do this so we can override add_item_to_inventory's count logic
-                    // FIXME: this doesn't set the appropriate flag for the hyper spray
+                    log::debug!("Adding {}x {} to inventory", count, game::item_name(item_id));
                     inventory.add_item(item_id);
                     inventory.set_item_count(item_id, count);
-                    GLOBAL.inc_item_count();
+                    if item_id == game::ITEM_ID_HYPER_SPRAY {
+                        GLOBAL.set_new_game_plus_item_flag(2);
+                    } else {
+                        GLOBAL.inc_item_count();
+                    }
                 } else {
+                    log::debug!("Adding {} to inventory", game::item_name(item_id));
                     GLOBAL.add_item_to_inventory(item_id);
                 }
             }
@@ -690,18 +702,59 @@ unsafe extern "C" fn init_inventory_hook() {
         inventory.unk27 = 1;
         inventory.unk28 = 10;
     }
+
+    GLOBAL.enable_item_override();
+}
+
+unsafe extern "C" fn item_pickup_text_hook(message_file: *mut *const u16, message_id: *mut i32) {
+    if !CONFIG_INTERFACE.is_enabled() || (*message_file).is_null() {
+        return;
+    }
+
+    let offset = *(*message_file).offset(*message_id as isize + 1);
+    let data = (*message_file).offset(offset as isize) as *const u8;
+    let Some((item_id, language)) = GLOBAL.get_item_id_for_message(data) else {
+        return;
+    };
+
+    let new_item = CONFIG_INTERFACE.map_item(item_id, !GLOBAL.is_player_maria());
+    if new_item == item_id {
+        return;
+    }
+
+    let Some((override_file, override_id)) = GLOBAL.get_message_for_item(new_item, language) else {
+        return;
+    };
+
+    *message_file = override_file as *const u16;
+    *message_id = override_id;
+}
+
+unsafe extern "C" fn item_pickup_inventory_hook(_return1: usize, _return2: usize, item_id: i32) -> i32 {
+    if GLOBAL.is_item_override_enabled() {
+        CONFIG_INTERFACE.map_item(item_id as i8, !GLOBAL.is_player_maria()) as i32
+    } else {
+        item_id
+    }
 }
 
 fn open_log() -> Result<()> {
     let log_file = File::create("sh2hvnknf.log")?;
     WriteLogger::init(LevelFilter::Debug, Config::default(), log_file)?;
     panic::set_hook(Box::new(|info| {
-        // FIXME: need to handle String as well as &str
-        let msg = info.payload().downcast_ref::<&str>().unwrap_or(&"unknown");
+        let msg = if let Some(msg) = info.payload().downcast_ref::<&str>() {
+            *msg
+        } else if let Some(msg) = info.payload().downcast_ref::<String>() {
+            msg.as_str()
+        } else {
+            "unknown"
+        };
         let (file, line) = info
             .location()
             .map_or(("unknown", 0), |l| (l.file(), l.line()));
         log::error!("Panic in {} on line {}: {}", file, line, msg);
+        let logger = log::logger();
+        logger.flush();
     }));
 
     Ok(())
@@ -831,6 +884,7 @@ fn main(reason: u32) -> Result<()> {
         Some(difficulty_selection_address),
         Some(darken_background_address),
         Some(init_inventory_address),
+        Some(after_description_call_address),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
@@ -858,6 +912,7 @@ fn main(reason: u32) -> Result<()> {
             &DIFFICULTY_SELECTION,
             &DRAW_DARKENED_BACKGROUND,
             &INIT_INVENTORY,
+            &AFTER_DESCRIPTION_CALL,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -867,7 +922,7 @@ fn main(reason: u32) -> Result<()> {
     log::debug!(
         "Found tex ref data at {:#08X}, colt anim push at {:#08X}, address set msg push at {:#08X}, demo anim push at {:#08X}, anim source push at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
         James anim1 at {:#08X}, James anim2 at {:#08X}, anim offset at {:#08X}, anim read at {:#08X}, draw msg call at {:#08X}, hit animation func at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
-        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, difficulty selection at {:#08X}, darkened background at {:#08X}, init inventory at {:#08X}",
+        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, difficulty selection at {:#08X}, darkened background at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}",
         tex_ref_call_address as usize,
         colt_anim_push_address as usize,
         address_set_msg_push_address as usize,
@@ -893,6 +948,7 @@ fn main(reason: u32) -> Result<()> {
         difficulty_selection_address as usize,
         darken_background_address as usize,
         init_inventory_address as usize,
+        after_description_call_address as usize,
     );
 
     unsafe {
@@ -946,6 +1002,9 @@ fn main(reason: u32) -> Result<()> {
         let init_inventory_entry_point = init_inventory_address.offset(-85);
         patch::assert_byte(init_inventory_entry_point, 0x6A)?; // push
 
+        let description_call_address = after_description_call_address.offset(-5);
+        patch::assert_byte(description_call_address, 0xE8)?; // call
+
         let request_file_size_address = patch::get_call_target(colt_anim_check_address) as usize;
         let set_character_addresses_address = patch::get_call_target(address_set_msg_check_address) as usize;
         let get_character_frame_size_address = patch::get_call_target(anim_frame_size_check_address) as usize;
@@ -954,6 +1013,7 @@ fn main(reason: u32) -> Result<()> {
         let difficulty_select_original_call = patch::get_call_target(difficulty_select_call_address) as usize;
         let add_item_to_inventory = patch::get_call_target(add_inventory_call_address) as usize;
         let inc_item_count = patch::get_call_target(inc_item_count_address) as usize;
+        let description_func = patch::get_call_target(description_call_address) as usize;
         // make sure the addresses look reasonable
         if !searcher.find_addresses_exec(
             &[
@@ -965,19 +1025,24 @@ fn main(reason: u32) -> Result<()> {
                 difficulty_select_original_call,
                 add_item_to_inventory,
                 inc_item_count,
+                description_func,
             ],
             sh2pc)?.iter().all(|f| *f) {
-            bail!("One or more of RequestFileSize() @ {:#08X}, SetCharacterAddresses() @ {:#08X}, GetCharacterFrameSize @ {:#08X}, James sound switch default {:#08X}, Maria sound switch default {:#08X} difficulty select call {:#08X}, add inventory {:#08X}, inc item count {:#08X} don't look right",
-                request_file_size_address, set_character_addresses_address, get_character_frame_size_address, james_sounds_switch_default as usize, maria_sounds_switch_default as usize, difficulty_select_original_call, add_item_to_inventory, inc_item_count);
+            bail!("One or more of RequestFileSize() @ {:#08X}, SetCharacterAddresses() @ {:#08X}, GetCharacterFrameSize @ {:#08X}, James sound switch default {:#08X}, Maria sound switch default {:#08X} difficulty select call {:#08X}, add inventory {:#08X}, inc item count {:#08X}, description func {:#08X} don't look right",
+                request_file_size_address, set_character_addresses_address, get_character_frame_size_address, james_sounds_switch_default as usize, maria_sounds_switch_default as usize, difficulty_select_original_call, add_item_to_inventory, inc_item_count, description_func);
         };
 
         let get_character_buffers_call_address = (set_character_addresses_address + 0x13) as *const c_void;
         patch::assert_byte(get_character_buffers_call_address, 0xE8)?; // call
 
+        let new_game_plus_flag_call = (add_item_to_inventory + 64) as *const c_void;
+        patch::assert_byte(new_game_plus_flag_call, 0xE8)?; // call
+
         let get_character_buffers_address = patch::get_call_target(get_character_buffers_call_address) as usize;
+        let new_game_plus_flag_func = patch::get_call_target(new_game_plus_flag_call) as usize;
         // make sure the addresses look reasonable
-        if !searcher.find_addresses_exec(&[get_character_buffers_address], sh2pc)?[0] {
-            bail!("GetCharacterBuffers() address {:#08X} doesn't look right", get_character_buffers_address);
+        let [true, true] = searcher.find_addresses_exec(&[get_character_buffers_address, new_game_plus_flag_func], sh2pc)? else {
+            bail!("GetCharacterBuffers() address {:#08X} or SetNewGamePlusFlag() address {:#08X} doesn't look right", get_character_buffers_address, new_game_plus_flag_func);
         };
 
         let maria_icon_func_address = maria_icon_draw_loop_address.offset(-16);
@@ -1081,7 +1146,7 @@ fn main(reason: u32) -> Result<()> {
             get_character_buffers_address, character_files_address, character_files_end_address,
             player_ptr_address, get_character_frame_size_address, weapon_data_address, grunt_sound_call,
             sound_param_data_address, draw_message_func as usize, inc_item_count, add_item_to_inventory,
-            inventory_address);
+            inventory_address, new_game_plus_flag_func).expect("initialization should not fail");
         CONTROL_PANEL.set_draw_message_ptr(draw_message_func);
         CONFIG_INTERFACE.set_funcs(draw_message_func as usize, darkened_background_entry_point as usize);
 
@@ -1241,6 +1306,19 @@ fn main(reason: u32) -> Result<()> {
         log::info!("Patching inventory logic at address {:#08X}", init_inventory_entry_point as usize);
         let init_inventory_jump = patch::jmp(init_inventory_entry_point as usize, init_inventory_hook as usize);
         patch::patch(init_inventory_entry_point, &init_inventory_jump)?;
+
+        // patch item pickup logic
+        log::info!("Patching item pickup logic at addresses {:#08X}, {:#08X}", add_item_to_inventory, description_func);
+
+        patch::set_trampoline(&mut GLOBAL.add_item_thunk, 0, item_pickup_inventory_hook as usize)?;
+        let item_pickup_inv_call = patch::call(add_item_to_inventory, &raw const GLOBAL.add_item_thunk as usize);
+        patch::patch(add_item_to_inventory as *const c_void, &item_pickup_inv_call)?;
+
+        patch::set_trampoline(&mut GLOBAL.item_description_thunk, 9, item_pickup_text_hook as usize)?;
+        let item_pickup_text_call = patch::call(description_func, &raw const GLOBAL.item_description_thunk as usize);
+        // our patch overlaps two instructions totaling 6 bytes, so insert a nop at the end
+        let call_padded = [item_pickup_text_call[0], item_pickup_text_call[1], item_pickup_text_call[2], item_pickup_text_call[3], item_pickup_text_call[4], 0x90];
+        patch::patch(description_func as *const c_void, &call_padded)?;
     }
 
     log::info!("All patches applied successfully");
@@ -1255,6 +1333,8 @@ extern "system" fn DllMain(_dll_module: HMODULE, reason: u32, _reserved: *const 
         Ok(_) => true,
         Err(e) => {
             log::error!("Fatal error: {e}");
+            let logger = log::logger();
+            logger.flush();
             false
         }
     }
