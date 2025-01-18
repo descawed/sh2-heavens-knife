@@ -415,23 +415,35 @@ impl PersistentData {
             message_file.add_message(&rifle_shells);
 
             // the revolver and wooden plank don't have messages because they're obtained in
-            // cutscenes. I'll try my hand at the German versions, but everyone else gets English
-            // for now.
-            message_file.add_message(if language == 'g' {
-                Self::pickup_message("Ich habe einen", "Revolver")
+            // cutscenes. I've attempted to cobble together the verbiage for other languages from
+            // pickup text for other items.
+            if language == 'j' {
+                message_file.add_message(&[0x03, 0xFF, 0x4C, 0x02, 0x3E, 0x02, 0x4D, 0x02, 0x32, 0x02, 0xFA, 0x00, 0x00, 0xFF, 0x01, 0x02, 0xEF, 0x07, 0xDA, 0x01, 0xAF, 0x0B, 0xFB, 0x01, 0xCE, 0x01, 0xFF, 0xFF, 0x00, 0x90]);
             } else {
-                Self::pickup_message("I got a", "revolver")
-            }.as_slice());
+                message_file.add_message(match language {
+                    'f' => Self::pickup_message("J'ai un", "revolver"),
+                    'g' => Self::pickup_message("Ich habe einen", "Revolver"),
+                    'i' => Self::pickup_message("Ho preso un", "revolver"),
+                    's' => Self::pickup_message("Tengo un", "revólver"),
+                    _ => Self::pickup_message("I got a", "revolver"),
+                }.as_slice());
+            }
             message_file.add_message(&revolver_bullets);
 
             let [hyper_spray] = Self::load_messages("stage_toilet", language, [3])?;
             message_file.add_message(&hyper_spray);
 
-            message_file.add_message(if language == 'g' {
-                Self::pickup_message("Ich habe ein", "Brett")
+            if language == 'j' {
+                message_file.add_message(&[0x03, 0xFF, 0xBF, 0x0D, 0x29, 0x07, 0x00, 0xFF, 0x01, 0x02, 0xEF, 0x07, 0xDA, 0x01, 0xAF, 0x0B, 0xFB, 0x01, 0xCE, 0x01, 0xFF, 0xFF, 0x00, 0x90]);
             } else {
-                Self::pickup_message("I got a", "wooden plank")
-            }.as_slice());
+                message_file.add_message(match language {
+                    'f' => Self::pickup_message("J'ai une", "planche de bois"),
+                    'g' => Self::pickup_message("Ich habe ein", "Brett"),
+                    'i' => Self::pickup_message("Ho preso una", "asse di legno"),
+                    's' => Self::pickup_message("Tengo un", "tablón de madera"),
+                    _ => Self::pickup_message("I got a", "wooden plank"),
+                }.as_slice());
+            }
 
             let [steel_pipe] = Self::load_messages("stage_town_west", language, [71])?;
             message_file.add_message(&steel_pipe);

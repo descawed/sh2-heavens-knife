@@ -67,6 +67,10 @@ impl<'a> MessageBuilder<'a> {
         for c in text.chars() {
             if c == '\n' {
                 self.add_control_code(ControlCode::LineBreak);
+            } else if c == 'ó' {
+                // hack until I can be bothered to determine the rest of the characters
+                self.data.write(&[0xD3]).unwrap();
+                self.length += 1;
             } else {
                 let index = CHAR_MAP.find(c).unwrap_or(0);
                 self.data.write(&[index as u8]).unwrap();
