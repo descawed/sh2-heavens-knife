@@ -1,7 +1,10 @@
 [package]
-name = "sh2hvnknf"
-version = "0.1.0"
+name = "knife"
+version = "0.2.0"
+authors = ["descawed <github@descawed.com>"]
 edition = "2021"
+description = "A mod for Silent Hill 2: Enhanced Edition that allows James and Maria to use each other's items"
+repository = "https://github.com/descawed/sh2-heavens-knife"
 
 [lib]
 crate-type = ["cdylib"]

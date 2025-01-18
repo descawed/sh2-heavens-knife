@@ -46,6 +46,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
+name = "knife"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "memchr",
+ "simplelog",
+ "toml",
+ "windows",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.159"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -129,18 +141,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87607cb1398ed59d48732e575a4c28a7a8ebf2454b964fe3f224f2afc07909e1"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "sh2hvnknf"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "memchr",
- "simplelog",
- "toml",
- "windows",
 ]
 
 [[package]]
