@@ -105,29 +105,8 @@ impl Message {
         }
     }
 
-    pub fn from_raw(data: &[u8]) -> Self {
-        let mut message = Self::new();
-        message.data[..data.len()].copy_from_slice(data);
-        message.length = data.len();
-        message
-    }
-
-    pub fn raw(setter: impl FnOnce(&mut MessageBuilder)) -> [u8; MESSAGE_MAX_LEN] {
-        let mut data = [0; MESSAGE_MAX_LEN];
-        MessageBuilder::build(&mut data, setter);
-        data
-    }
-
-    pub fn raw_from_str(s: &str) -> [u8; MESSAGE_MAX_LEN] {
-        Self::raw(|builder| builder.add_text(s))
-    }
-
     pub fn set_message(&mut self, setter: impl FnOnce(&mut MessageBuilder)) {
         self.length = MessageBuilder::build(&mut self.data, setter);
-    }
-
-    pub fn set_message_from_str(&mut self, text: &str) {
-        self.set_message(|builder| builder.add_text(text));
     }
 
     pub const fn data(&self) -> *const u8 {
@@ -221,14 +200,6 @@ impl MessageFile {
 
     pub const fn data(&self) -> *const u8 {
         self.data.as_ptr()
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        &self.data[..self.length]
-    }
-
-    pub fn num_messages(&self) -> usize {
-        self.messages.len()
     }
 
     pub fn get(&self, i: usize) -> &[u8] {
