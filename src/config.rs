@@ -843,8 +843,6 @@ impl UserInterface {
                     // newlines to push the text above the difficulty selection
                     builder.add_text("Exit\n\n\n\n");
                     builder.add_control_code(ControlCode::White);
-
-                    builder.add_text("On exit, settings will be saved to the config file.");
                 });
             }
             State::InventoryEditor(start_item, selected_item) => {
