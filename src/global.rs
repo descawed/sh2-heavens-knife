@@ -35,6 +35,8 @@ pub struct PersistentData {
     pub difficulty_select_thunk: [u8; 20],
     pub item_description_thunk: [u8; 24],
     pub add_item_thunk: [u8; 11],
+    pub menu_input_loop_thunk: [u8; 26],
+    pub pause_menu_draw_thunk: [u8; 13],
     pub original_animation1: *mut game::AnimationRecord,
     pub original_animation2: *mut game::AnimationRecord,
     player_character_flag: *const u8,
@@ -256,6 +258,23 @@ impl PersistentData {
                 0x56, // push esi
                 0x89, 0xC6, // mov esi, eax
                 0xFF, 0xE1, // jmp ecx
+            ],
+            menu_input_loop_thunk: [
+                0x77, 0x0F, // ja default
+                0x60, // pushad
+                0x50, // push eax
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x83, 0xC4, 0x04, // add esp, 4
+                0x85, 0xC0, // test eax, eax
+                0x61, // popad
+                0x0F, 0x84, 0, 0, 0, 0, // jz <return>
+                0xE9, 0, 0, 0, 0, // default: jmp <default>
+            ],
+            pause_menu_draw_thunk: [
+                0xE8, 0, 0, 0, 0, // call <original>
+                0xE8, 0, 0, 0, 0, // call <target>
+                0x01, 0xC4, // add esp, eax ; if we want to skip drawing of the menu, we'll return 4
+                0xC3, // ret
             ],
             original_animation1: std::ptr::null_mut(),
             original_animation2: std::ptr::null_mut(),
@@ -644,5 +663,26 @@ impl PersistentData {
 
     pub const fn is_item_override_enabled(&self) -> bool {
         self.enable_item_override
+    }
+
+    pub unsafe fn add_item(&self, item_id: i8) {
+        let inventory = self.inventory();
+        if !inventory.has_item(item_id) {
+            self.add_item_to_inventory(item_id);
+        }
+    }
+
+    pub unsafe fn add_item_with_count(&self, item_id: i8, count: u16) {
+        if !game::item_has_count(item_id) {
+            self.add_item(item_id);
+            return;
+        }
+
+        if count == 0 && game::item_count_must_be_nonzero(item_id) {
+            return;
+        }
+
+        self.add_item(item_id);
+        self.inventory().set_count(item_id, count);
     }
 }

@@ -5,167 +5,12 @@ use crate::game::ControlCode;
 use crate::input;
 
 #[derive(Debug, Clone)]
-pub struct Inventory {
-    equipped_item: i8,
-    item_flags: u128,
-    item_counts: [u16; game::NUM_USABLE_ITEMS],
-}
-
-impl Inventory {
-    pub const fn new() -> Self {
-        // default to great knife mode
-        Self {
-            equipped_item: game::ITEM_ID_GREAT_KNIFE,
-            item_flags: 1 << game::ITEM_ID_GREAT_KNIFE,
-            item_counts: [0; game::NUM_USABLE_ITEMS],
-        }
-    }
-
-    pub fn iter_items(&self) -> impl Iterator<Item = (i8, Option<u16>)> + use<'_> {
-        (1..game::NUM_USABLE_ITEMS).into_iter().filter_map(move |item_id| {
-            (self.item_flags & (1 << item_id) != 0).then(|| {
-                let count = self.item_counts[item_id];
-                let item_id = item_id as i8;
-                (item_id, Self::has_count(item_id).then_some(count))
-            })
-        })
-    }
-
-    pub const fn equip_item(&mut self, item_id: i8) {
-        self.equipped_item = item_id;
-        if item_id > 0 {
-            self.item_flags |= 1 << item_id;
-        }
-    }
-
-    pub const fn toggle_equip(&mut self, item_id: i8) {
-        if self.equipped_item == item_id || !Self::can_equip(item_id) {
-            self.equipped_item = game::ITEM_ID_NOTHING;
-        } else {
-            self.equip_item(item_id);
-        }
-    }
-
-    pub const fn can_equip(item_id: i8) -> bool {
-        matches!(item_id,
-            game::ITEM_ID_NOTHING | game::ITEM_ID_HANDGUN | game::ITEM_ID_SHOTGUN | game::ITEM_ID_RIFLE
-            | game::ITEM_ID_REVOLVER | game::ITEM_ID_WOODEN_PLANK | game::ITEM_ID_STEEL_PIPE
-            | game::ITEM_ID_GREAT_KNIFE | game::ITEM_ID_CHAINSAW | game::ITEM_ID_CLEAVER
-            | game::ITEM_ID_HYPER_SPRAY
-        )
-    }
-
-    pub const fn has_count(item_id: i8) -> bool {
-        matches!(item_id,
-            game::ITEM_ID_HYPER_SPRAY | game::ITEM_ID_HANDGUN_BULLETS
-            | game::ITEM_ID_SHOTGUN_SHELLS | game::ITEM_ID_RIFLE_SHELLS | game::ITEM_ID_REVOLVER_BULLETS
-            | game::ITEM_ID_HEALTH_DRINK | game::ITEM_ID_FIRST_AID_KIT | game::ITEM_ID_AMPOULE
-            | game::ITEM_ID_HANDGUN | game::ITEM_ID_SHOTGUN | game::ITEM_ID_RIFLE
-            | game::ITEM_ID_REVOLVER
-        )
-    }
-
-    pub const fn must_be_nonzero(item_id: i8) -> bool {
-        matches!(item_id,
-            game::ITEM_ID_HYPER_SPRAY | game::ITEM_ID_HANDGUN_BULLETS
-            | game::ITEM_ID_SHOTGUN_SHELLS | game::ITEM_ID_RIFLE_SHELLS | game::ITEM_ID_REVOLVER_BULLETS
-            | game::ITEM_ID_HEALTH_DRINK | game::ITEM_ID_FIRST_AID_KIT | game::ITEM_ID_AMPOULE
-        )
-    }
-
-    pub const fn item_name(item_id: i8) -> &'static str {
-        game::ITEM_NAMES[item_id as usize]
-    }
-
-    pub const fn add_item(&mut self, item_id: i8) {
-        self.item_flags |= 1 << item_id;
-        let index = item_id as usize;
-        match item_id {
-            game::ITEM_ID_HEALTH_DRINK | game::ITEM_ID_FIRST_AID_KIT | game::ITEM_ID_AMPOULE | game::ITEM_ID_REVOLVER => {
-                self.item_counts[index] += 1;
-            }
-            game::ITEM_ID_HANDGUN | game::ITEM_ID_HANDGUN_BULLETS | game::ITEM_ID_REVOLVER_BULLETS => {
-                self.item_counts[index] += 10;
-            }
-            game::ITEM_ID_SHOTGUN | game::ITEM_ID_SHOTGUN_SHELLS => {
-                self.item_counts[index] += 6;
-            }
-            game::ITEM_ID_RIFLE | game::ITEM_ID_RIFLE_SHELLS => {
-                self.item_counts[index] += 4;
-            }
-            game::ITEM_ID_HYPER_SPRAY => {
-                self.item_counts[index] += 8;
-            }
-            _ => (),
-        }
-
-        if self.item_counts[index] > game::MAX_ITEM_COUNT {
-            self.item_counts[index] = game::MAX_ITEM_COUNT;
-        }
-    }
-
-    pub const fn remove_item(&mut self, item_id: i8) {
-        self.item_flags &= !(1 << item_id);
-        self.item_counts[item_id as usize] = 0;
-    }
-
-    pub const fn toggle_item(&mut self, item_id: i8) {
-        if self.has_item(item_id) {
-            self.remove_item(item_id);
-        } else {
-            self.add_item(item_id);
-        }
-    }
-
-    pub const fn has_item(&self, item_id: i8) -> bool {
-        self.item_flags & (1 << item_id) != 0
-    }
-
-    pub const fn get_count(&self, item_id: i8) -> u16 {
-        self.item_counts[item_id as usize]
-    }
-
-    pub const fn set_count(&mut self, item_id: i8, count: u16) {
-        self.item_counts[item_id as usize] = if count > game::MAX_ITEM_COUNT {
-            game::MAX_ITEM_COUNT
-        } else {
-            count
-        };
-        if count > 0 {
-            self.item_flags |= 1 << item_id;
-        } else if Self::must_be_nonzero(item_id) {
-            self.item_flags &= !(1 << item_id);
-        }
-    }
-
-    pub const fn get_max_count(item_id: i8) -> u16 {
-        match item_id {
-            game::ITEM_ID_HANDGUN | game::ITEM_ID_REVOLVER => 10,
-            game::ITEM_ID_SHOTGUN => 6,
-            game::ITEM_ID_RIFLE => 4,
-            game::ITEM_ID_HYPER_SPRAY => 8,
-            _ => game::MAX_ITEM_COUNT,
-        }
-    }
-
-    pub const fn equipped_item(&self) -> i8 {
-        self.equipped_item
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ScenarioConfig {
-    weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
-    starting_inventory: Inventory,
-}
-
-#[derive(Debug, Clone)]
 pub struct Config {
     is_enabled: bool,
     james_weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
     maria_weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
-    james_starting_inventory: Inventory,
-    maria_starting_inventory: Inventory,
+    james_starting_inventory: game::Inventory,
+    maria_starting_inventory: game::Inventory,
 }
 
 impl Config {
@@ -204,9 +49,13 @@ impl Config {
                 game::ITEM_ID_CHAINSAW,
                 game::ITEM_ID_CLEAVER,
             ],
-            james_starting_inventory: Inventory::new(),
-            maria_starting_inventory: Inventory::new(),
+            james_starting_inventory: game::Inventory::new(),
+            maria_starting_inventory: game::Inventory::new(),
         };
+
+        // default to the great knife scenario
+        this.james_starting_inventory.equip_item(game::ITEM_ID_GREAT_KNIFE);
+        this.maria_starting_inventory.add_item(game::ITEM_ID_GREAT_KNIFE);
 
         // Maria must start with the revolver equipped
         this.maria_starting_inventory.equipped_item = game::ITEM_ID_REVOLVER;
@@ -391,6 +240,7 @@ pub struct UserInterface {
     config: Config,
     draw_message_ptr: Option<unsafe extern "C" fn(*const u8)>,
     darkened_background_ptr: Option<unsafe extern "C" fn()>,
+    draw_message_positioned_ptr: Option<unsafe extern "C" fn(*const u8, i32, i32)>,
     message: game::Message,
     state: State,
     keyboard: input::Keyboard,
@@ -402,6 +252,7 @@ impl UserInterface {
             config,
             draw_message_ptr: None,
             darkened_background_ptr: None,
+            draw_message_positioned_ptr: None,
             message: game::Message::new(),
             state: State::StatusIndicator,
             keyboard: input::Keyboard::new(),
@@ -453,10 +304,24 @@ impl UserInterface {
         }
     }
 
-    pub fn show(&mut self, is_james: bool) {
+    pub fn reset_ui(&mut self) {
+        self.state = State::StatusIndicator;
+    }
+
+    pub fn show(&mut self, is_james: bool, live_inventory: Option<&mut game::Inventory>) {
         use crate::game::ControlCode;
 
         self.keyboard.update().expect("keyboard state update should not fail");
+
+        let is_maria_scenario_start = !is_james && live_inventory.is_none();
+        // if we have live inventory, we're in-game, so we must be at the pause menu. otherwise,
+        // we're at the difficulty selection screen prior to starting a new game.
+        let is_pause_menu = live_inventory.is_some();
+        let inventory = live_inventory.unwrap_or_else(|| if is_james {
+            &mut self.config.james_starting_inventory
+        } else {
+            &mut self.config.maria_starting_inventory
+        });
 
         // handle input for state
         match self.state {
@@ -498,12 +363,6 @@ impl UserInterface {
                 }
             }
             State::InventoryEditor(start_item, mut selected_item) => {
-                let inventory = if is_james {
-                    &mut self.config.james_starting_inventory
-                } else {
-                    &mut self.config.maria_starting_inventory
-                };
-
                 if self.keyboard.is_key_down_once(VK_F7) {
                     self.state = State::StatusIndicator;
                 } else if self.keyboard.is_key_down_once(VK_ESCAPE) {
@@ -520,25 +379,25 @@ impl UserInterface {
                             selected_item = game::ITEM_ID_HEALTH_DRINK;
                         }
                     } else if self.keyboard.is_any_key_down_once(&[VK_LEFT, VK_A]) {
-                        if Inventory::has_count(selected_item) {
+                        if game::item_has_count(selected_item) {
                             let count = inventory.get_count(selected_item);
                             if count >= 1 {
                                 inventory.set_count(selected_item, count - 1);
-                            } else if !Inventory::must_be_nonzero(selected_item) && inventory.has_item(selected_item) {
+                            } else if !game::item_count_must_be_nonzero(selected_item) && inventory.has_item(selected_item) {
                                 inventory.remove_item(selected_item);
                             } else {
-                                inventory.set_count(selected_item, Inventory::get_max_count(selected_item));
+                                inventory.set_count(selected_item, game::get_item_max_count(selected_item));
                             }
                         } else {
                             inventory.toggle_item(selected_item);
                         }
                     } else if self.keyboard.is_any_key_down_once(&[VK_RIGHT, VK_D]) {
-                        if Inventory::has_count(selected_item) {
+                        if game::item_has_count(selected_item) {
                             let count = inventory.get_count(selected_item);
-                            if !inventory.has_item(selected_item) && !Inventory::must_be_nonzero(selected_item) {
+                            if !inventory.has_item(selected_item) && !game::item_count_must_be_nonzero(selected_item) {
                                 inventory.add_item(selected_item);
                                 inventory.set_count(selected_item, 0);
-                            } else if count < Inventory::get_max_count(selected_item) {
+                            } else if count < game::get_item_max_count(selected_item) {
                                 inventory.set_count(selected_item, count + 1);
                             } else {
                                 inventory.remove_item(selected_item);
@@ -546,7 +405,7 @@ impl UserInterface {
                         } else {
                             inventory.toggle_item(selected_item);
                         }
-                    } else if self.keyboard.is_key_down_once(VK_E) && is_james {
+                    } else if self.keyboard.is_key_down_once(VK_E) && !is_maria_scenario_start {
                         // can't change Maria's starting equipped weapon, otherwise the game crashes
                         inventory.toggle_equip(selected_item);
                     }
@@ -621,7 +480,11 @@ impl UserInterface {
                     if option == MainMenuOption::InventoryEditor {
                         builder.add_control_code(ControlCode::Blue);
                     }
-                    builder.add_text("Edit starting inventory");
+                    builder.add_text(if is_pause_menu {
+                        "Edit inventory"
+                    } else {
+                        "Edit starting inventory"
+                    });
                     builder.add_control_code(ControlCode::White);
                     builder.add_control_code(ControlCode::LineBreak);
 
@@ -638,22 +501,14 @@ impl UserInterface {
                     // newlines to push the text above the difficulty selection
                     builder.add_text("Exit\n\n\n\n\n");
                 });
-
-                //self.draw_darkened_background();
             }
             State::InventoryEditor(start_item, selected_item) => {
-                let inventory = if is_james {
-                    &self.config.james_starting_inventory
-                } else {
-                    &self.config.maria_starting_inventory
-                };
-
                 self.message.set_message(|builder| {
                     builder.add_text("Equipped: ");
-                    if !is_james {
+                    if is_maria_scenario_start {
                         builder.add_control_code(ControlCode::GrayscaleGradient);
                     }
-                    builder.add_text(Inventory::item_name(inventory.equipped_item));
+                    builder.add_text(game::item_name(inventory.equipped_item));
                     builder.add_control_code(ControlCode::White);
                     builder.add_control_code(ControlCode::LineBreak);
                     builder.add_control_code(ControlCode::LineBreak);
@@ -664,7 +519,7 @@ impl UserInterface {
                             builder.add_control_code(ControlCode::Blue);
                         }
 
-                        builder.add_text(Inventory::item_name(next_item));
+                        builder.add_text(game::item_name(next_item));
                         builder.add_text(": ");
 
                         let has_item = inventory.has_item(next_item);
@@ -674,7 +529,7 @@ impl UserInterface {
                             builder.add_control_code(ControlCode::Red);
                         }
 
-                        if has_item && Inventory::has_count(next_item) {
+                        if has_item && game::item_has_count(next_item) {
                             let count = inventory.get_count(next_item);
                             builder.add_text(&format!("{count}"));
                         } else {
@@ -695,7 +550,7 @@ impl UserInterface {
                     }
 
                     builder.add_control_code(ControlCode::LineBreak);
-                    builder.add_text(if is_james {
+                    builder.add_text(if !is_maria_scenario_start {
                         "Use E to equip, Esc to exit"
                     } else {
                         "Use Esc to exit"
@@ -732,20 +587,33 @@ impl UserInterface {
             }
         }
 
-        self.print_message(&self.message);
+        if is_pause_menu && self.state == State::StatusIndicator {
+            self.print_message_positioned(&self.message, 260, 400);
+        } else {
+            self.print_message(&self.message);
+        }
     }
 
     pub const fn has_focus(&self) -> bool {
         !matches!(self.state, State::StatusIndicator)
     }
 
-    pub unsafe fn set_funcs(&mut self, draw_message_ptr: usize, darkened_background_ptr: usize) {
+    pub unsafe fn set_funcs(&mut self, draw_message_ptr: usize, darkened_background_ptr: usize, draw_message_positioned_ptr: usize) {
         self.draw_message_ptr = Some(std::mem::transmute(draw_message_ptr));
         self.darkened_background_ptr = Some(std::mem::transmute(darkened_background_ptr));
+        self.draw_message_positioned_ptr = Some(std::mem::transmute(draw_message_positioned_ptr));
     }
 
     pub fn draw_darkened_background(&self) {
         unsafe { self.darkened_background_ptr.unwrap()() };
+    }
+
+    pub fn print_positioned(&self, data: *const u8, x: i32, y: i32) {
+        unsafe { self.draw_message_positioned_ptr.unwrap()(data, x, y) };
+    }
+
+    pub fn print_message_positioned(&self, msg: &game::Message, x: i32, y: i32) {
+        self.print_positioned(msg.data(), x, y);
     }
 
     pub fn print(&self, data: *const u8) {
@@ -768,7 +636,7 @@ impl UserInterface {
         self.print(std::ptr::null());
     }
 
-    pub const fn starting_inventory(&self, is_james: bool) -> Option<&Inventory> {
+    pub const fn starting_inventory(&self, is_james: bool) -> Option<&game::Inventory> {
         if self.config.is_enabled {
             Some(if is_james {
                 &self.config.james_starting_inventory

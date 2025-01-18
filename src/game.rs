@@ -7,6 +7,7 @@ pub use msg::*;
 
 mod d3d;
 pub use d3d::*;
+use crate::game;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -587,7 +588,7 @@ impl Character {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Inventory {
     pub flags: [u32; 3],
     pub counts: [u16; 13], // only tracks counts for items where the count is significant
@@ -607,18 +608,118 @@ pub struct Inventory {
 }
 
 impl Inventory {
+    pub const fn new() -> Self {
+        Self {
+            flags: [0; 3],
+            counts: [0; 13],
+            unk26: 0,
+            unk27: 0,
+            unk28: 0,
+            equipped_item: ITEM_ID_NOTHING,
+            unk2a: 0,
+            unk2c: 0.0,
+            unk30: 0,
+            unk32: 0,
+            unk34: 0,
+            unk36: 0,
+            active_weapon_item: ITEM_ID_NOTHING,
+            unk39: 0,
+            unk3a: 0,
+        }
+    }
+
+    pub fn iter_items(&self) -> impl Iterator<Item = (i8, Option<u16>)> + use<'_> {
+        let flags = self.flags();
+        (1..NUM_USABLE_ITEMS).into_iter().filter_map(move |item_id| {
+            (flags & (1 << item_id) != 0).then(|| {
+                let count = if item_id < self.counts.len() {
+                    self.counts[item_id]
+                } else {
+                    0
+                };
+                let item_id = item_id as i8;
+                (item_id, item_has_count(item_id).then_some(count))
+            })
+        })
+    }
+
+    pub const fn equip_item(&mut self, item_id: i8) {
+        self.equipped_item = item_id;
+        if item_id > 0 {
+            self.add_item(item_id);
+        }
+    }
+
+    pub const fn toggle_equip(&mut self, item_id: i8) {
+        if self.equipped_item == item_id || !can_equip_item(item_id) {
+            self.equipped_item = ITEM_ID_NOTHING;
+        } else {
+            self.equip_item(item_id);
+        }
+    }
+
     pub const fn add_item(&mut self, item_id: i8) {
         if item_id > 0 {
             self.flags[(item_id as usize) >> 5] |= 1 << (item_id & 0x1F);
         }
     }
 
-    pub const fn set_item_count(&mut self, item_id: i8, count: u16) {
+    pub const fn remove_item(&mut self, item_id: i8) {
+        self.flags[(item_id as usize) >> 5] &= !(1 << (item_id & 0x1F));
+        self.set_count(item_id, 0);
+    }
+
+    pub const fn toggle_item(&mut self, item_id: i8) {
+        if self.has_item(item_id) {
+            self.remove_item(item_id);
+        } else {
+            self.add_item(item_id);
+        }
+    }
+    
+    pub const fn has_item(&self, item_id: i8) -> bool {
+        if item_id < 0 || item_id > ITEM_ID_MAX {
+            return false;
+        }
+        
+        self.flags[(item_id as usize) >> 5] & (1 << (item_id & 0x1F)) != 0
+    }
+
+    pub const fn get_count(&self, item_id: i8) -> u16 {
+        if item_id < 0 || item_id > self.counts.len() as i8 {
+            0
+        } else {
+            self.counts[item_id as usize]
+        }
+    }
+
+    pub const fn set_count(&mut self, item_id: i8, count: u16) {
         if item_id > 0 {
             let index = item_id as usize;
             if index < self.counts.len() {
                 self.counts[index] = count;
+                self.add_item(item_id);
             }
+        }
+    }
+
+    pub const fn flags(&self) -> u128 {
+        (self.flags[0] as u128) | ((self.flags[1] as u128) << 32) | ((self.flags[2] as u128) << 64)
+    }
+
+    pub fn set_flags(&mut self, flags: u128) {
+        self.flags[0] = (flags & 0xffffffff) as u32;
+        self.flags[1] = ((flags >> 32) & 0xffffffff) as u32;
+        self.flags[2] = ((flags >> 64) & 0xffffffff) as u32;
+
+        for i in 0..self.counts.len() {
+            if i > 0 && !self.has_item(i as i8) {
+                self.counts[i] = 0;
+            }
+        }
+
+        if !self.has_item(self.equipped_item) {
+            self.equipped_item = ITEM_ID_NOTHING;
         }
     }
 
@@ -838,6 +939,11 @@ pub const ITEM_ID_CLEAVER: i8 = 17;
 pub const ITEM_ID_PHOTO_OF_MARY: i8 = 20;
 pub const ITEM_ID_LETTER_FROM_MARY: i8 = 21;
 pub const ITEM_ID_WHITE_LIQUID: i8 = 85;
+
+pub const ITEM_ID_MIN_WEAPON: i8 = ITEM_ID_HANDGUN;
+pub const ITEM_ID_MAX_WEAPON: i8 = ITEM_ID_CLEAVER;
+pub const ITEM_ID_MIN: i8 = ITEM_ID_HEALTH_DRINK;
+pub const ITEM_ID_MAX: i8 = ITEM_ID_WHITE_LIQUID;
 pub const NUM_WEAPON_AMMO_ITEMS: usize = (ITEM_ID_CLEAVER - ITEM_ID_HANDGUN + 1) as usize;
 pub const MAX_ITEM_COUNT: u16 = 999;
 
@@ -935,6 +1041,43 @@ pub const ITEM_NAMES: [&'static str; NUM_USABLE_ITEMS] = [
 
 pub const fn item_name(item_id: i8) -> &'static str {
     ITEM_NAMES[item_id as usize]
+}
+
+pub const fn item_has_count(item_id: i8) -> bool {
+    matches!(item_id,
+            ITEM_ID_HYPER_SPRAY | ITEM_ID_HANDGUN_BULLETS | ITEM_ID_SHOTGUN_SHELLS
+            | ITEM_ID_RIFLE_SHELLS | ITEM_ID_REVOLVER_BULLETS | ITEM_ID_HEALTH_DRINK
+            | ITEM_ID_FIRST_AID_KIT | ITEM_ID_AMPOULE | ITEM_ID_HANDGUN | ITEM_ID_SHOTGUN
+            | ITEM_ID_RIFLE | ITEM_ID_REVOLVER
+        )
+}
+
+pub const fn get_item_max_count(item_id: i8) -> u16 {
+    match item_id {
+        ITEM_ID_NONE | ITEM_ID_NOTHING => 0,
+        ITEM_ID_HANDGUN | ITEM_ID_REVOLVER => 10,
+        ITEM_ID_SHOTGUN => 6,
+        ITEM_ID_RIFLE => 4,
+        ITEM_ID_HYPER_SPRAY => 8,
+        _ => MAX_ITEM_COUNT,
+    }
+}
+
+pub const fn can_equip_item(item_id: i8) -> bool {
+    matches!(item_id,
+            ITEM_ID_NOTHING | ITEM_ID_HANDGUN | ITEM_ID_SHOTGUN | ITEM_ID_RIFLE
+            | ITEM_ID_REVOLVER | ITEM_ID_WOODEN_PLANK | ITEM_ID_STEEL_PIPE
+            | ITEM_ID_GREAT_KNIFE | ITEM_ID_CHAINSAW | ITEM_ID_CLEAVER
+            | ITEM_ID_HYPER_SPRAY
+        )
+}
+
+pub const fn item_count_must_be_nonzero(item_id: i8) -> bool {
+    matches!(item_id,
+            ITEM_ID_HYPER_SPRAY | ITEM_ID_HANDGUN_BULLETS
+            | ITEM_ID_SHOTGUN_SHELLS | ITEM_ID_RIFLE_SHELLS | ITEM_ID_REVOLVER_BULLETS
+            | ITEM_ID_HEALTH_DRINK | ITEM_ID_FIRST_AID_KIT | ITEM_ID_AMPOULE
+        )
 }
 
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
