@@ -46,6 +46,10 @@ if exist knife.toml (
     del /q /f knife.toml
     if exist knife.toml set errors=y
 )
+if exist knife.log (
+    del /q /f knife.log
+    if exist knife.log set errors=y
+)
 if exist readme_knife.txt (
     del /q /f readme_knife.txt
     if exist readme_knife.txt set errors=y
