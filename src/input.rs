@@ -47,7 +47,7 @@ impl Keyboard {
         false
     }
 
-    pub const fn is_key_toggled(&self, key: VIRTUAL_KEY) -> bool {
+    /*pub const fn is_key_toggled(&self, key: VIRTUAL_KEY) -> bool {
         self.new_keys[key.0 as usize] & 1 != 0
-    }
+    }*/
 }

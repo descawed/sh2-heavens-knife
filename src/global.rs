@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -257,14 +256,14 @@ impl PersistentData {
     fn pickup_message(prefix: &str, item_name: &str) -> game::Message {
         let mut message = game::Message::new();
         message.set_message(|builder| {
-            builder.add_text(prefix);
+            builder.text(prefix);
             if !prefix.ends_with(' ') {
-                builder.add_text(" ");
+                builder.text(" ");
             }
-            builder.add_control_code(game::ControlCode::Green);
-            builder.add_text(item_name);
-            builder.add_control_code(game::ControlCode::White);
-            builder.add_text(".");
+            builder.control(game::ControlCode::Green);
+            builder.text(item_name);
+            builder.control(game::ControlCode::White);
+            builder.text(".");
             builder.set_post_code(0x9000);
         });
         message
