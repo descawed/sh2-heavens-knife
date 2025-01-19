@@ -16,9 +16,9 @@ game and Enhanced Edition already installed before you proceed.
    "Save" or "Save & Launch Game").
 
    ![ASI plugin checkbox](assets/sh2ee_asi.png)
-4. If everything has been done correctly, the next time you launch the game, you'll see a message from the mod at the
-   bottom of the main menu. By default, the mod will be loaded but turned off. You can enable it and change settings
-   from the [configuration menu](#Configuration).
+4. If everything has been done correctly, the next time you launch the game, you'll see a message from the mod in the
+   bottom left corner of the main menu. By default, the mod will be loaded but turned off. You can enable it and change
+   settings from the [configuration menu](#Configuration).
   
    ![Main menu with mod message](assets/knife_main_menu.png)
 
@@ -170,6 +170,11 @@ The options work as follows:
   this setting is disabled, it can't be re-enabled while in-game; you'll have to return to the main menu if you want to
   turn it back on. Note that this setting doesn't affect the starting inventory editor; that's always available from
   the main menu prior to starting a new game.
+- **Show status message**: This controls whether the status message showing whether the mod is turned on or off is
+  displayed at the bottom of the screen in the main menu and pause menu. The default is "Always", meaning the message
+  is always displayed. "Only when on" displays the message when the mod is turned on and hides it when the mod is
+  turned off. "Never" never displays the message. Note that you can still use F7 from the main menu or pause menu to
+  access the mod configuration menu even when the message is hidden.
 
 ## Build
 

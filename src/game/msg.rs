@@ -3,32 +3,77 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::Result;
+use encoding_rs::WINDOWS_1252;
 
-const CHAR_MAP: &str = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
-
-#[derive(Debug, Clone, Copy)]
+// the unused variants are useful for documentation purposes and may be used at some point in the
+// future
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub enum ControlCode {
-    White = 0,
-    Blue = 1,
-    Red = 2,
-    Green = 3,
-    Yellow = 4,
-    LightBlue = 5,
-    Purple = 6,
-    BlueGreenGradient = 7,
-    DarkRed = 8,
-    Invisible = 9,
-    GrayscaleGradient = 10,
-    BrightRed = 11,
-    Pink = 12,
-    CenterVertically = 0xFA,
-    LineBreak = 0xFD,
-    EndOfMessage = 0xFF,
+    SingleByteMode,
+    PositionY(u16),
+    PositionX(u16),
+    MoveCursorLeft(u8),
+    MoveCursorRight(u8),
+    White,
+    Blue,
+    Red,
+    Green,
+    Yellow,
+    LightBlue,
+    Purple,
+    BlueGreenGradient,
+    DarkRed,
+    Invisible,
+    GrayscaleGradient,
+    BrightRed,
+    Pink,
+    LineBreak,
+    EndOfMessage,
 }
 
 impl ControlCode {
-    const fn as_bytes(&self) -> [u8; 2] {
-        [0xFF, *self as u8]
+    const fn as_int(&self) -> u16 {
+        match self {
+            Self::SingleByteMode => 0x8000,
+            Self::PositionY(y) => 0xF800 | (*y & 0x1FF),
+            Self::PositionX(x) => 0xFA00 | (*x & 0x1FF),
+            Self::MoveCursorLeft(offset) => 0xFC00 | (*offset as u16),
+            Self::MoveCursorRight(offset) => 0xFD00 | (*offset as u16),
+            Self::White => 0xFF00,
+            Self::Blue => 0xFF01,
+            Self::Red => 0xFF02,
+            Self::Green => 0xFF03,
+            Self::Yellow => 0xFF04,
+            Self::LightBlue => 0xFF05,
+            Self::Purple => 0xFF06,
+            Self::BlueGreenGradient => 0xFF07,
+            Self::DarkRed => 0xFF08,
+            Self::Invisible => 0xFF09,
+            Self::GrayscaleGradient => 0xFF0A,
+            Self::BrightRed => 0xFF0B,
+            Self::Pink => 0xFF0C,
+            Self::LineBreak => 0xFFFD,
+            Self::EndOfMessage => 0xFFFF,
+        }
+    }
+
+    const fn sb_bytes(&self) -> [u8; 2] {
+        let int = self.as_int();
+        if int >= 0xE000 {
+            int.to_be_bytes()
+        } else {
+            int.to_le_bytes()
+        }
+    }
+
+    const fn db_bytes(&self) -> [u8; 2] {
+        self.as_int().to_le_bytes()
+    }
+
+    const fn exits_single_byte_mode(&self) -> bool {
+        let int = self.as_int();
+        int > 0x8000 && (int < 0xFF00 || (int >= 0xFFE0 && int <= 0xFFE9))
     }
 }
 
@@ -37,22 +82,24 @@ pub struct MessageBuilder<'a> {
     data: &'a mut [u8],
     length: usize,
     post_code: u16,
+    is_in_single_byte_mode: bool,
 }
 
 impl<'a> MessageBuilder<'a> {
-    fn build(mut data: &'a mut [u8], setter: impl FnOnce(&mut Self)) -> usize {
+    const fn new(data: &'a mut [u8]) -> Self {
+        Self { data, length: 0, post_code: 0, is_in_single_byte_mode: false }
+    }
+
+    fn build(data: &'a mut [u8], setter: impl FnOnce(&mut Self)) -> usize {
         data.fill(0);
 
-        // initialize header - 0x8000 = single-byte mode
-        data.write(&[0x00, 0x80]).unwrap();
-
-        let mut builder = Self { data, length: 2, post_code: 0 };
+        let mut builder = Self::new(data);
         setter(&mut builder);
-        builder.add_control_code(ControlCode::EndOfMessage);
+        builder.control(ControlCode::EndOfMessage);
 
         let mut length = builder.length;
         if (length & 1) != 0 {
-            // length must be even because the file header gives the offset in 16-bit units
+            // length must be even because the file header gives the offset in 16-bit units.
             // padding must go between end-of-message code and post-message code
             builder.data.write(&[0]).unwrap();
             length += 1;
@@ -63,25 +110,39 @@ impl<'a> MessageBuilder<'a> {
         length + 2
     }
 
-    pub fn add_text(&mut self, text: &str) {
-        for c in text.chars() {
-            if c == '\n' {
-                self.add_control_code(ControlCode::LineBreak);
-            } else if c == 'ó' {
-                // hack until I can be bothered to determine the rest of the characters
-                self.data.write(&[0xD3]).unwrap();
+    pub fn text(&mut self, text: &str) {
+        if !self.is_in_single_byte_mode {
+            self.control(ControlCode::SingleByteMode);
+        }
+
+        let bytes = WINDOWS_1252.encode(text).0;
+        for &c in bytes.iter() {
+            if c == b'\n' {
+                self.control(ControlCode::LineBreak);
+            } else if c < b' ' {
+                self.data.write(&[0]).unwrap();
                 self.length += 1;
             } else {
-                let index = CHAR_MAP.find(c).unwrap_or(0);
-                self.data.write(&[index as u8]).unwrap();
+                self.data.write(&[c - b' ']).unwrap();
                 self.length += 1;
             }
         }
     }
 
-    pub fn add_control_code(&mut self, code: ControlCode) {
-        self.data.write(&code.as_bytes()).unwrap();
-        self.length += 2;
+    pub fn control(&mut self, code: ControlCode) {
+        let bytes = if self.is_in_single_byte_mode {
+            code.sb_bytes()
+        } else {
+            code.db_bytes()
+        };
+        self.data.write(&bytes).unwrap();
+        self.length += bytes.len();
+
+        if code.exits_single_byte_mode() {
+            self.is_in_single_byte_mode = false;
+        } else if matches!(code, ControlCode::SingleByteMode) {
+            self.is_in_single_byte_mode = true;
+        }
     }
 
     pub fn set_post_code(&mut self, code: u16) {
@@ -107,6 +168,10 @@ impl Message {
 
     pub fn set_message(&mut self, setter: impl FnOnce(&mut MessageBuilder)) {
         self.length = MessageBuilder::build(&mut self.data, setter);
+    }
+
+    pub fn set_message_from_str(&mut self, text: &str) {
+        self.set_message(|builder| builder.text(text));
     }
 
     pub const fn data(&self) -> *const u8 {

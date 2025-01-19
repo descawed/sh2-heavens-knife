@@ -86,11 +86,70 @@ const fn next_log_level(level: LevelFilter) -> LevelFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowStatusMessage {
+    Always,
+    OnlyWhenOn,
+    Never,
+}
+
+impl ShowStatusMessage {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::OnlyWhenOn => "on",
+            Self::Never => "never",
+        }
+    }
+
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            Self::Always => "Always",
+            Self::OnlyWhenOn => "Only when on",
+            Self::Never => "Never",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "always" => Some(Self::Always),
+            "on" => Some(Self::OnlyWhenOn),
+            "never" => Some(Self::Never),
+            _ => None,
+        }
+    }
+
+    pub const fn next(&self) -> Self {
+        match self {
+            Self::Always => Self::Never,
+            Self::OnlyWhenOn => Self::Always,
+            Self::Never => Self::OnlyWhenOn,
+        }
+    }
+
+    pub const fn previous(&self) -> Self {
+        match self {
+            Self::Always => Self::OnlyWhenOn,
+            Self::OnlyWhenOn => Self::Never,
+            Self::Never => Self::Always,
+        }
+    }
+
+    pub const fn should_show(&self, is_enabled: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::OnlyWhenOn => is_enabled,
+            Self::Never => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     startup_behavior: StartupBehavior,
     was_enabled_on_last_run: bool,
     allow_in_game_inventory_editing: bool,
+    show_status_message: ShowStatusMessage,
     log_level: LevelFilter,
     is_enabled: bool,
     james_weapon_ammo_mapping: [i8; game::NUM_WEAPON_AMMO_ITEMS],
@@ -105,6 +164,7 @@ impl Config {
             startup_behavior: StartupBehavior::OffByDefault,
             was_enabled_on_last_run: false,
             allow_in_game_inventory_editing: true,
+            show_status_message: ShowStatusMessage::Always,
             log_level: LevelFilter::Info,
             is_enabled: false,
             james_weapon_ammo_mapping: [
@@ -218,6 +278,7 @@ impl Config {
         config.startup_behavior = table.get("startup").and_then(Value::as_str).and_then(StartupBehavior::from_str).unwrap_or(StartupBehavior::OffByDefault);
         config.was_enabled_on_last_run = table.get("was_enabled_on_last_run").and_then(Value::as_bool).unwrap_or(false);
         config.allow_in_game_inventory_editing = table.get("allow_in_game_inventory_editing").and_then(Value::as_bool).unwrap_or(true);
+        config.show_status_message = table.get("show_status_message").and_then(Value::as_str).and_then(ShowStatusMessage::from_str).unwrap_or(ShowStatusMessage::Always);
         config.log_level = table.get("log_level").and_then(Value::as_str).and_then(|s| LevelFilter::from_str(s).ok()).unwrap_or(LevelFilter::Info);
 
         config.is_enabled = config.startup_behavior == StartupBehavior::OnByDefault || (config.startup_behavior == StartupBehavior::RememberLastState && config.was_enabled_on_last_run);
@@ -250,6 +311,7 @@ impl Config {
         table.insert(String::from("startup"), Value::from(self.startup_behavior.as_str()));
         table.insert(String::from("was_enabled_on_last_run"), Value::from(self.is_enabled));
         table.insert(String::from("allow_in_game_inventory_editing"), Value::from(self.allow_in_game_inventory_editing));
+        table.insert(String::from("show_status_message"), Value::from(self.show_status_message.as_str()));
         table.insert(String::from("log_level"), Value::from(self.log_level.to_string()));
 
         table.insert(String::from("james"), Value::from(Self::save_scenario_data(&self.james_weapon_ammo_mapping, &self.james_starting_inventory)));
@@ -264,6 +326,10 @@ impl Config {
 
     pub const fn is_disabled(&self) -> bool {
         matches!(self.startup_behavior, StartupBehavior::Disabled)
+    }
+
+    pub const fn should_show_status_message(&self) -> bool {
+        self.show_status_message.should_show(self.is_enabled)
     }
 }
 
@@ -306,6 +372,7 @@ enum SettingsOption {
     Startup,
     LogLevel,
     AllowInGameInventoryEditing,
+    ShowStatusMessage,
     Exit,
 }
 
@@ -315,7 +382,8 @@ impl SettingsOption {
             Self::Startup => Self::Exit,
             Self::LogLevel => Self::Startup,
             Self::AllowInGameInventoryEditing => Self::LogLevel,
-            Self::Exit => Self::AllowInGameInventoryEditing,
+            Self::ShowStatusMessage => Self::AllowInGameInventoryEditing,
+            Self::Exit => Self::ShowStatusMessage,
         }
     }
 
@@ -323,7 +391,8 @@ impl SettingsOption {
         match self {
             Self::Startup => Self::LogLevel,
             Self::LogLevel => Self::AllowInGameInventoryEditing,
-            Self::AllowInGameInventoryEditing => Self::Exit,
+            Self::AllowInGameInventoryEditing => Self::ShowStatusMessage,
+            Self::ShowStatusMessage => Self::Exit,
             Self::Exit => Self::Startup,
         }
     }
@@ -476,11 +545,11 @@ impl UserInterface {
 
     fn draw_toggle(is_enabled: bool, builder: &mut game::MessageBuilder) {
         if is_enabled {
-            builder.add_control_code(ControlCode::Green);
-            builder.add_text("ON");
+            builder.control(ControlCode::Green);
+            builder.text("ON");
         } else {
-            builder.add_control_code(ControlCode::Red);
-            builder.add_text("OFF");
+            builder.control(ControlCode::Red);
+            builder.text("OFF");
         }
     }
 
@@ -758,6 +827,13 @@ impl UserInterface {
                                 self.config.allow_in_game_inventory_editing = !self.config.allow_in_game_inventory_editing;
                             }
                         }
+                        SettingsOption::ShowStatusMessage => {
+                            if self.keyboard.is_any_key_down_once(&[VK_LEFT, VK_A]) {
+                                self.config.show_status_message = self.config.show_status_message.previous();
+                            } else if self.keyboard.is_any_key_down_once(&[VK_RIGHT, VK_D]) {
+                                self.config.show_status_message = self.config.show_status_message.next();
+                            }
+                        }
                         SettingsOption::Exit => {
                             if self.keyboard.is_any_key_down_once(&[VK_RETURN, VK_SPACE]) {
                                 self.state = State::MainMenu(MainMenuOption::Settings);
@@ -771,120 +847,132 @@ impl UserInterface {
         // draw for state
         match self.state {
             State::StatusIndicator => {
-                self.message.set_message(|builder| {
-                    // newlines to make sure the text is drawn under other menu options
-                    builder.add_text("\n\n\n\nHeaven's Knife: ");
-                    Self::draw_toggle(self.config.is_enabled, builder);
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_text(" (press F7 to configure)");
-                });
+                if self.config.should_show_status_message() {
+                    self.message.set_message(|builder| {
+                        builder.control(ControlCode::PositionX(0));
+                        builder.control(ControlCode::PositionY(430));
+                        // x position 0 doesn't actually place us all the way to the left, so let's
+                        // back up even more
+                        builder.control(ControlCode::MoveCursorLeft(80));
+
+                        builder.text("Heaven's Knife: ");
+                        Self::draw_toggle(self.config.is_enabled, builder);
+                        builder.control(ControlCode::White);
+                        builder.control(ControlCode::LineBreak);
+                        // not sure why it's necessary to move further left on this line
+                        builder.control(ControlCode::MoveCursorLeft(81));
+                        builder.text("Press F7 for menu");
+                    });
+                } else {
+                    self.message.set_message_from_str("");
+                }
             }
             State::MainMenu(option) => {
                 self.message.set_message(|builder| {
                     if option == MainMenuOption::Enable {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text("Heaven's Knife: ");
+                    builder.text("Heaven's Knife: ");
                     Self::draw_toggle(self.config.is_enabled, builder);
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     // only show the character select when we're not in-game. once we're in-game,
                     // we're always working with the player character
                     if !is_in_game {
                         if option == MainMenuOption::Character {
-                            builder.add_control_code(ControlCode::Blue);
+                            builder.control(ControlCode::Blue);
                         }
-                        builder.add_text("Character: ");
-                        builder.add_control_code(ControlCode::White);
-                        builder.add_text(if self.is_james_selected {
+                        builder.text("Character: ");
+                        builder.control(ControlCode::White);
+                        builder.text(if self.is_james_selected {
                             "James"
                         } else {
                             "Maria"
                         });
-                        builder.add_control_code(ControlCode::LineBreak);
+                        builder.control(ControlCode::LineBreak);
                     }
 
                     // indent the next two options under the character select if we're displaying it
                     if option == MainMenuOption::InventoryEditor {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     } else if !can_change_inventory_editor_setting {
-                        builder.add_control_code(ControlCode::GrayscaleGradient);
+                        builder.control(ControlCode::GrayscaleGradient);
                     }
-                    builder.add_text(if is_in_game {
+                    builder.text(if is_in_game {
                         "Edit inventory"
                     } else {
                         "  Edit starting inventory"
                     });
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == MainMenuOption::ItemMapper {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text(if is_in_game {
+                    builder.text(if is_in_game {
                         "Edit item mappings"
                     } else {
                         "  Edit item mappings"
                     });
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == MainMenuOption::Settings {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text("Settings");
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.text("Settings");
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == MainMenuOption::Exit {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
                     // newlines to push the text above the difficulty selection
-                    builder.add_text("Exit\n\n\n\n");
-                    builder.add_control_code(ControlCode::White);
+                    builder.text("Exit\n\n\n\n");
+                    builder.control(ControlCode::White);
                 });
             }
             State::InventoryEditor(start_item, selected_item) => {
                 self.message.set_message(|builder| {
-                    builder.add_text("Equipped: ");
+                    builder.text("Equipped: ");
                     if is_maria_scenario_start {
-                        builder.add_control_code(ControlCode::GrayscaleGradient);
+                        builder.control(ControlCode::GrayscaleGradient);
                     }
-                    builder.add_text(game::item_name(inventory.equipped_item));
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.text(game::item_name(inventory.equipped_item));
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
+                    builder.control(ControlCode::LineBreak);
 
                     let mut next_item = start_item;
                     for _ in 0..MAX_ITEMS_PER_PAGE {
                         if next_item == selected_item {
-                            builder.add_control_code(ControlCode::Blue);
+                            builder.control(ControlCode::Blue);
                         }
 
-                        builder.add_text(game::item_name(next_item));
-                        builder.add_text(": ");
+                        builder.text(game::item_name(next_item));
+                        builder.text(": ");
 
                         let has_item = inventory.has_item(next_item);
                         if has_item {
-                            builder.add_control_code(ControlCode::Green);
+                            builder.control(ControlCode::Green);
                         } else {
-                            builder.add_control_code(ControlCode::Red);
+                            builder.control(ControlCode::Red);
                         }
 
                         if has_item && game::item_has_count(next_item) {
                             let count = inventory.get_count(next_item);
-                            builder.add_text(&format!("{count}"));
+                            builder.text(&format!("{count}"));
                         } else {
-                            builder.add_text(if has_item {
+                            builder.text(if has_item {
                                 "Yes"
                             } else {
                                 "No"
                             });
                         }
 
-                        builder.add_control_code(ControlCode::White);
-                        builder.add_control_code(ControlCode::LineBreak);
+                        builder.control(ControlCode::White);
+                        builder.control(ControlCode::LineBreak);
 
                         next_item += 1;
                         if next_item > game::ITEM_ID_WHITE_LIQUID {
@@ -892,8 +980,8 @@ impl UserInterface {
                         }
                     }
 
-                    builder.add_control_code(ControlCode::LineBreak);
-                    builder.add_text(if !is_maria_scenario_start {
+                    builder.control(ControlCode::LineBreak);
+                    builder.text(if !is_maria_scenario_start {
                         "Use E to equip, Esc to exit"
                     } else {
                         "Use Esc to exit"
@@ -911,92 +999,105 @@ impl UserInterface {
                     for (i, &mapped_item) in mapping.iter().enumerate() {
                         let option = ItemMapperOption::from_item_id((i as i8) + game::ITEM_ID_HANDGUN);
                         if option == selected_option {
-                            builder.add_control_code(ControlCode::Blue);
+                            builder.control(ControlCode::Blue);
                         }
 
-                        builder.add_text(option.name());
-                        builder.add_text(": ");
-                        builder.add_text(game::item_name(mapped_item));
+                        builder.text(option.name());
+                        builder.text(": ");
+                        builder.text(game::item_name(mapped_item));
 
-                        builder.add_control_code(ControlCode::White);
-                        builder.add_control_code(ControlCode::LineBreak);
+                        builder.control(ControlCode::White);
+                        builder.control(ControlCode::LineBreak);
                     }
 
                     if selected_option == ItemMapperOption::Exit {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text("Exit");
+                    builder.text("Exit");
                 });
             }
             State::Settings(option) => {
                 self.message.set_message(|builder| {
                     if option == SettingsOption::Startup {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text("Mod startup: ");
-                    builder.add_control_code(match self.config.startup_behavior {
+                    builder.text("Mod startup: ");
+                    builder.control(match self.config.startup_behavior {
                         StartupBehavior::Disabled => ControlCode::Red,
                         StartupBehavior::OffByDefault => ControlCode::Yellow,
                         StartupBehavior::RememberLastState => ControlCode::LightBlue,
                         StartupBehavior::OnByDefault => ControlCode::Green,
                     });
-                    builder.add_text(self.config.startup_behavior.display_name());
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.text(self.config.startup_behavior.display_name());
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == SettingsOption::LogLevel {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text("Log level: ");
-                    builder.add_control_code(match self.config.log_level {
+                    builder.text("Log level: ");
+                    builder.control(match self.config.log_level {
                         LevelFilter::Off => ControlCode::GrayscaleGradient,
                         _ => ControlCode::White,
                     });
-                    builder.add_text(&self.config.log_level.to_string());
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.text(&self.config.log_level.to_string());
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == SettingsOption::AllowInGameInventoryEditing {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     } else if !can_change_inventory_editor_setting {
-                        builder.add_control_code(ControlCode::GrayscaleGradient);
+                        builder.control(ControlCode::GrayscaleGradient);
                     }
-                    builder.add_text("In-game inventory editor: ");
+                    builder.text("In-game inventory editor: ");
                     if self.config.allow_in_game_inventory_editing {
-                        builder.add_control_code(ControlCode::Green);
-                        builder.add_text("Enabled");
+                        builder.control(ControlCode::Green);
+                        builder.text("Enabled");
                     } else {
                         // we'll let this be gray as well if the setting can't be changed
                         if can_change_inventory_editor_setting {
-                            builder.add_control_code(ControlCode::Red);
+                            builder.control(ControlCode::Red);
                         }
-                        builder.add_text("Disabled");
+                        builder.text("Disabled");
                     }
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
+
+                    if option == SettingsOption::ShowStatusMessage {
+                        builder.control(ControlCode::Blue);
+                    }
+                    builder.text("Show status message: ");
+                    builder.control(match self.config.show_status_message {
+                        ShowStatusMessage::Never => ControlCode::Red,
+                        ShowStatusMessage::OnlyWhenOn => ControlCode::Yellow,
+                        ShowStatusMessage::Always => ControlCode::Green,
+                    });
+                    builder.text(self.config.show_status_message.display_name());
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == SettingsOption::Exit {
-                        builder.add_control_code(ControlCode::Blue);
+                        builder.control(ControlCode::Blue);
                     }
-                    builder.add_text("Exit");
-                    builder.add_control_code(ControlCode::White);
-                    builder.add_control_code(ControlCode::LineBreak);
+                    builder.text("Exit");
+                    builder.control(ControlCode::White);
+                    builder.control(ControlCode::LineBreak);
 
                     if option == SettingsOption::Startup && self.config.startup_behavior == StartupBehavior::Disabled {
-                        builder.add_control_code(ControlCode::LineBreak);
-                        builder.add_control_code(ControlCode::Yellow);
-                        builder.add_text("WARNING: ");
-                        builder.add_control_code(ControlCode::White);
-                        builder.add_text("re-enabling the mod will require\nediting the config file by hand.");
+                        builder.control(ControlCode::LineBreak);
+                        builder.control(ControlCode::Yellow);
+                        builder.text("WARNING: ");
+                        builder.control(ControlCode::White);
+                        builder.text("re-enabling the mod will require\nediting the config file by hand.");
                     } else if option == SettingsOption::AllowInGameInventoryEditing && !self.config.allow_in_game_inventory_editing {
-                        builder.add_control_code(ControlCode::LineBreak);
-                        builder.add_text("Cannot be re-enabled during gameplay.\nReturn to the new game menu to re-enable.");
+                        builder.control(ControlCode::LineBreak);
+                        builder.text("Cannot be re-enabled during gameplay.\nReturn to the new game menu to re-enable.");
                     } else {
                         // pad with blank lines to keep spacing the same
-                        builder.add_text("\n\n");
+                        builder.text("\n\n");
                     }
 
-                    builder.add_text("\n\n\n\n");
+                    builder.text("\n\n\n\n");
                 });
             }
         }

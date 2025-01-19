@@ -1,6 +1,6 @@
 [package]
 name = "knife"
-version = "0.2.0"
+version = "1.0.0"
 authors = ["descawed <github@descawed.com>"]
 edition = "2021"
 description = "A mod for Silent Hill 2: Enhanced Edition that allows James and Maria to use each other's items"
@@ -17,6 +17,7 @@ panic = "abort"
 
 [dependencies]
 anyhow = "1.0.95"
+encoding_rs = "0.8.35"
 log = "0.4.25"
 memchr = "2.7.4"
 simplelog = "0.12.2"

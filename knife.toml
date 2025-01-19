@@ -4,7 +4,7 @@
 #                   the game was played.
 # "default_on" - The mod is turned on when the game starts, but can be turned off from the configuration menu.
 # "disabled" - The mod is completely disabled - no patches are applied and it cannot be turned on or off within the game.
-startup = "default_off"
+startup = "remember_last"
 
 # Whether the mod was turned on the last time the game was run. Only relevant when using startup = "remember_last".
 was_enabled_on_last_run = false
@@ -12,6 +12,11 @@ was_enabled_on_last_run = false
 # Whether to allow the inventory editor to be used during gameplay. If false, only the starting inventory can be edited
 # just before starting a new game.
 allow_in_game_inventory_editing = true
+
+# When to show the mod status message at the bottom of the main menu and pause menu that shows whether the mod is on or
+# off. Options are "always", "on" (only show the message when the mod is turned on), and "never". You can still press
+# F7 on these menus to enter the configuration editor even when the message is hidden.
+show_status_message = "always"
 
 # How much information to log in the log file. The options, from most to least verbose, are "trace", "debug", "info",
 # "warn", "error", and "off".
