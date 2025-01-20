@@ -29,7 +29,7 @@ pub struct PersistentData {
     pub menu_input_loop_thunk: [u8; 26],
     pub pause_menu_draw_thunk: [u8; 13],
     pub main_menu_thunk: [u8; 22],
-    pub maria_sound_return_thunk: [u8; 9],
+    pub maria_sound_return_thunk: [u8; 14],
     player_character_flag: *const u8,
     inc_item_count: Option<unsafe extern "C" fn()>,
     add_item_to_inventory: Option<unsafe extern "C" fn(item_id: i32)>,
@@ -185,6 +185,7 @@ impl PersistentData {
                 0x55, // push ebp
                 0x56, // push esi
                 0x57, // push edi
+                0xBB, 0x04, 0x00, 0x00, 0x00, // mov ebx, 4
                 0xE9, 0, 0, 0, 0, // call <target>
             ],
             player_character_flag: std::ptr::null(),

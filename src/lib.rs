@@ -1044,7 +1044,7 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(maria_action_sounds_switch, &maria_sound_check_jump)?;
 
         // after Maria's function plays her sounds, jump to the end of James' function, which has extra logic for the chainsaw and hyper spray
-        patch::set_trampoline(&mut GLOBAL.maria_sound_return_thunk, 4, james_extra_weapon_sound_logic as usize)?;
+        patch::set_trampoline(&mut GLOBAL.maria_sound_return_thunk, 9, james_extra_weapon_sound_logic as usize)?;
         patch::patch(maria_sound_return, &patch::jmp(maria_sound_return as usize, &raw const GLOBAL.maria_sound_return_thunk as usize))?;
 
         // patch weapon transform logic
