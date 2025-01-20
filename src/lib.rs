@@ -38,14 +38,6 @@ const MARIA_ICON_DRAW_LOOP: [u8; 16] = [
 ];
 const MARIA_WEAPON_ASSERT: [u8; 8] = [0xFF, 0x75, 0x1B, 0x68, 0x17, 0x03, 0x00, 0x00];
 const MARIA_WEAPON_ASSERT2: [u8; 8] = [0xFF, 0x75, 0x1D, 0x68, 0x7C, 0x03, 0x00, 0x00];
-const CHECK_JAMES_WEAPON_LIST: [u8; 7] = [
-    0x31, 0xD2, // xor edx, edx
-    0xE9, 0x9F, 0x00, 0x00, 0x00, // jmp +159 bytes
-];
-const CHECK_JAMES_WEAPON_LIST2: [u8; 7] = [
-    0x31, 0xD2, // xor edx, edx
-    0xE9, 0x75, 0x00, 0x00, 0x00, // jmp +117 bytes
-];
 const DRAW_MESSAGE_FUNC: [u8; 9] = [
     0x8B, 0x44, 0x24, 0x04, 0x85, 0xC0, 0x75, 0x06, 0xA3,
 ];
@@ -434,10 +426,7 @@ unsafe extern "C" fn init_inventory_hook() {
         }
     }
 
-    if is_maria {
-        // Maria must start with the revolver equipped, otherwise the game crashes
-        inventory.equipped_item = game::ITEM_ID_REVOLVER;
-    } else {
+    if !is_maria {
         // I don't know what these do, but the original code sets them for James, so we will, too
         inventory.unk26 = 1;
         inventory.unk27 = 1;
@@ -506,6 +495,10 @@ unsafe extern "C" fn pause_menu_draw_hook() -> u32 {
     } else {
         0
     }
+}
+
+unsafe extern "C" fn find_maria_weapon_info() -> isize {
+    GLOBAL.get_maria_weapon_offset()
 }
 
 fn open_log(level: LevelFilter) -> Result<()> {
@@ -984,16 +977,25 @@ fn main(reason: u32) -> Result<()> {
             load_weapon_address as usize,
             load_weapon_address2 as usize,
         );
-        patch::patch(maria_weapon_assert_address, &CHECK_JAMES_WEAPON_LIST)?;
-        patch::patch(weapon_player_check_address2, &[0x90, 0x90])?; // nop out jump to always use James path
-        patch::patch(maria_weapon_assert_address2, &CHECK_JAMES_WEAPON_LIST2)?;
 
+        // first, insert nop sled
+        patch::patch(maria_weapon_assert_address, &[0x90; 27])?;
+        // then, insert call to our function
+        patch::patch(maria_weapon_assert_address, &patch::call(maria_weapon_assert_address as usize, find_maria_weapon_info as usize))?;
+
+        patch::patch(weapon_player_check_address2, &[0x90, 0x90])?; // nop out jump to always use James path
+
+        patch::patch(maria_weapon_assert_address2, &[0x90; 29])?;
+        patch::patch(maria_weapon_assert_address2, &patch::call(maria_weapon_assert_address2 as usize, find_maria_weapon_info as usize))?;
+
+        // when equipping a weapon, point the weapon to the animation files for the appropriate character
         let zero_memory_address = patch::get_call_target(load_weapon_address);
         patch::set_trampoline(&mut GLOBAL.load_weapon_thunk, 1, override_animation_paths as usize)?;
         let load_weapon_call = patch::call(load_weapon_address as usize, &raw const GLOBAL.load_weapon_thunk as usize);
         patch::set_trampoline(&mut GLOBAL.load_weapon_thunk, 7, zero_memory_address as usize)?;
         patch::patch(load_weapon_address, &load_weapon_call)?;
 
+        // when equipping a weapon, point the weapon to the animation files for the appropriate character
         let zero_memory_address2 = patch::get_call_target(load_weapon_address2);
         patch::set_trampoline(&mut GLOBAL.load_weapon_thunk2, 1, override_animation_paths as usize)?;
         let load_weapon_call2 = patch::call(load_weapon_address2 as usize, &raw const GLOBAL.load_weapon_thunk as usize);
@@ -1009,6 +1011,7 @@ fn main(reason: u32) -> Result<()> {
         // patch weapon sound logic
         log::info!("Patching weapon sound logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", james_action_sounds_switch as usize, maria_action_sounds_switch as usize, james_sounds_switch_default as usize, maria_sounds_switch_default as usize);
 
+        // add in weapon sounds for Maria's weapons when wielded by James
         patch::set_trampoline_conditional(&mut GLOBAL.james_action_sound_thunk, 0, james_sounds_switch_default as usize)?;
         patch::set_trampoline(&mut GLOBAL.james_action_sound_thunk, 16, james_sound_check as usize)?;
         let james_sounds_switch2_default = patch::get_conditional_jump_target(james_sounds_switch_default.offset(16));
@@ -1018,6 +1021,7 @@ fn main(reason: u32) -> Result<()> {
         let james_sound_check_jump = patch::jmp(james_action_sounds_switch as usize, &raw const GLOBAL.james_action_sound_thunk as usize);
         patch::patch(james_action_sounds_switch, &james_sound_check_jump)?;
 
+        // add in weapon sounds for James' weapons when wielded by Maria
         patch::set_trampoline_conditional(&mut GLOBAL.maria_action_sound_thunk, 0, maria_sounds_switch_default as usize)?;
         patch::set_trampoline(&mut GLOBAL.maria_action_sound_thunk, 16, maria_sound_check as usize)?;
         let maria_sounds_switch2_default = patch::get_conditional_jump_target(maria_sounds_switch_default.offset(6));
@@ -1030,6 +1034,7 @@ fn main(reason: u32) -> Result<()> {
         // patch weapon transform logic
         log::info!("Patching equipped weapon transform logic at address {:#08X}", rotate_bone_func_address as usize);
 
+        // apply hard-coded weapon-related transforms to the correct bones when the weapon is being wielded by the other character
         patch::set_trampoline(&mut GLOBAL.rotate_bone_transform_thunk, 20, equipped_weapon_transform_override as usize)?;
         patch::set_trampoline(&mut GLOBAL.rotate_bone_transform_thunk, 32, rotate_bone_func_address.offset(5) as usize)?;
         let rotate_bone_transform_jump = patch::jmp(rotate_bone_func_address as usize, &raw const GLOBAL.rotate_bone_transform_thunk as usize);
@@ -1038,6 +1043,7 @@ fn main(reason: u32) -> Result<()> {
         // patch UI for configuration
         log::info!("Patching configuration UI at addresses {:#08X}, {:#08X}, {:#08X}", menu_input_loop_start as usize, main_menu_dispatch_func as usize, init_inventory_entry_point as usize);
 
+        // display status message and listen for config menu key on main menu
         patch::set_trampoline(&mut GLOBAL.main_menu_thunk, 0, main_menu_original_call)?;
         patch::set_trampoline(&mut GLOBAL.main_menu_thunk, 6, main_menu_hook as usize)?;
         patch::patch(main_menu_dispatch_func, &patch::call(main_menu_dispatch_func as usize, &raw const GLOBAL.main_menu_thunk as usize))?;
@@ -1050,6 +1056,7 @@ fn main(reason: u32) -> Result<()> {
         patch::set_trampoline(&mut GLOBAL.menu_input_loop_thunk, 21, menu_input_loop_default as usize)?;
         patch::patch(menu_input_loop_start, &patch::jmp(menu_input_loop_start as usize, &raw const GLOBAL.menu_input_loop_thunk as usize))?;
 
+        // display status message and listen for config menu key on pause menu
         let pause_menu_first_call = patch::get_call_target(pause_menu_entry_address);
         patch::set_trampoline(&mut GLOBAL.pause_menu_draw_thunk, 0, pause_menu_first_call as usize)?;
         patch::set_trampoline(&mut GLOBAL.pause_menu_draw_thunk, 5, pause_menu_draw_hook as usize)?;
@@ -1063,10 +1070,13 @@ fn main(reason: u32) -> Result<()> {
         // patch item pickup logic
         log::info!("Patching item pickup logic at addresses {:#08X}, {:#08X}", add_item_to_inventory, description_func);
 
+        // hook add item logic so we can replace items overridden by the item mapper
         patch::set_trampoline(&mut GLOBAL.add_item_thunk, 0, item_pickup_inventory_hook as usize)?;
         let item_pickup_inv_call = patch::call(add_item_to_inventory, &raw const GLOBAL.add_item_thunk as usize);
         patch::patch(add_item_to_inventory as *const c_void, &item_pickup_inv_call)?;
 
+        // hook interaction message display so we can display the appropriate message when picking up an item overridden
+        // by the item mapper
         patch::set_trampoline(&mut GLOBAL.item_description_thunk, 9, item_pickup_text_hook as usize)?;
         let item_pickup_text_call = patch::call(description_func, &raw const GLOBAL.item_description_thunk as usize);
         // our patch overlaps two instructions totaling 6 bytes, so insert a nop at the end

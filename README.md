@@ -108,13 +108,6 @@ At the top of the screen, you can see the equipped weapon. You can press E to se
 equipped weapon. Pressing E on the weapon that's already equipped, or on an item that's not equippable, will clear the
 equipped weapon.
 
-**Note**: When editing Maria's starting inventory, the option to change the equipped weapon is disabled. This is because
-the game expects her to have the revolver equipped in the opening cutscene and will crash if she doesn't. However, the
-game will allow you to have a weapon equipped which is not actually in your inventory. So, if you don't want Maria to
-have the revolver, remove it from her inventory. Then, at the first opportunity after the opening cutscene, unequip it
-or equip a different weapon. This will eliminate the revolver from her inventory without having to edit the inventory a
-second time.
-
 ### Mappings
 
 The item mappings menu allows you to replace weapon and ammo pickups with pickups of different weapons and ammo. Here's

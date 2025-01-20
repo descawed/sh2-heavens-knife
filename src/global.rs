@@ -377,9 +377,13 @@ impl PersistentData {
         Some((file.data(), (item_id - game::ITEM_ID_HANDGUN) as i32))
     }
 
-    pub unsafe fn set_weapon_animations(&mut self) {
-        let weapon_info = std::slice::from_raw_parts_mut(self.weapon_info, game::NUM_WEAPON_INFOS);
-        let is_player_maria = self.is_player_maria();
+    pub unsafe fn weapon_info(&self) -> &'static mut [game::WeaponInfo] {
+        std::slice::from_raw_parts_mut(self.weapon_info, game::NUM_WEAPON_INFOS)
+    }
+
+    pub fn set_weapon_animations(&mut self) {
+        let weapon_info = unsafe { self.weapon_info() };
+        let is_player_maria = unsafe { self.is_player_maria() };
         let animations = if is_player_maria {
             &mut self.maria_weapon_animations
         } else {
@@ -400,6 +404,26 @@ impl PersistentData {
         weapon_info[9].animation = &raw mut animations.cleaver;
         // skip Maria's no-weapon animation
         weapon_info[11].animation = &raw mut animations.revolver;
+    }
+
+    pub unsafe fn get_maria_weapon_offset(&self) -> isize {
+        let equipped_item = self.equipped_item_id() as i16;
+        let weapon_info = self.weapon_info();
+        let maria_weapon_info = self.weapon_info.offset(10) as *const game::WeaponInfo;
+
+        // the first entry is James' no-weapon entry, so we skip that for maria
+        for info in &weapon_info[1..] {
+            if info.item_id == -1 {
+                break;
+            }
+
+            if info.item_id == equipped_item {
+                return (&raw const *info).byte_offset_from(maria_weapon_info);
+            }
+        }
+
+        log::error!("Failed to find weapon info for Maria's equipped item: {}", equipped_item);
+        0
     }
 
     pub const unsafe fn is_player_maria(&self) -> bool {

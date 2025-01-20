@@ -39,6 +39,6 @@ weapon_ammo_mapping = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
 
 # starting inventory for Maria. default is the great knife scenario.
 [maria.starting_inventory]
-equipped_item = 10  # Maria must have the revolver equipped to start the game or the game will crash. changes to this setting are ignored.
+equipped_item = 15
 flags = [0x8000, 0, 0]
 counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

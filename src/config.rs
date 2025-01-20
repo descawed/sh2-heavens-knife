@@ -623,7 +623,6 @@ impl UserInterface {
             }
         }
 
-        let is_maria_scenario_start = !self.is_james_selected && live_inventory.is_none();
         let inventory = live_inventory.unwrap_or_else(|| if self.is_james_selected {
             &mut self.config.james_starting_inventory
         } else {
@@ -738,8 +737,7 @@ impl UserInterface {
                         } else {
                             inventory.toggle_item(selected_item);
                         }
-                    } else if self.keyboard.is_key_down_once(VK_E) && !is_maria_scenario_start {
-                        // can't change Maria's starting equipped weapon, otherwise the game crashes
+                    } else if self.keyboard.is_key_down_once(VK_E) {
                         inventory.toggle_equip(selected_item);
                     }
 
@@ -936,9 +934,6 @@ impl UserInterface {
             State::InventoryEditor(start_item, selected_item) => {
                 self.message.set_message(|builder| {
                     builder.text("Equipped: ");
-                    if is_maria_scenario_start {
-                        builder.control(ControlCode::GrayscaleGradient);
-                    }
                     builder.text(game::item_name(inventory.equipped_item));
                     builder.control(ControlCode::White);
                     builder.control(ControlCode::LineBreak);
@@ -981,11 +976,7 @@ impl UserInterface {
                     }
 
                     builder.control(ControlCode::LineBreak);
-                    builder.text(if !is_maria_scenario_start {
-                        "Use E to equip, Esc to exit"
-                    } else {
-                        "Use Esc to exit"
-                    });
+                    builder.text("Use E to equip, Esc to exit");
                 });
             }
             State::ItemMapper(selected_option) => {
