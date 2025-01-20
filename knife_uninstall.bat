@@ -58,9 +58,9 @@ if exist sh2e\pic\etc\itemmenu3.tex (
     del /q /f sh2e\pic\etc\itemmenu3.tex
     if exist sh2e\pic\etc\itemmenu3.tex set errors=y
 )
-if exist sh2e\data\chr\wp\jms_weapon.anm (
-    del /q /f sh2e\data\chr\wp\jms_weapon.anm
-    if exist sh2e\data\chr\wp\jms_weapon.anm set errors=y
+if exist sh2e\chr\wp\jms_weapon.anm (
+    del /q /f sh2e\chr\wp\jms_weapon.anm
+    if exist sh2e\chr\wp\jms_weapon.anm set errors=y
 )
 if exist data\chr\jms\jms_wpcolt.anm (
     del /q /f data\chr\jms\jms_wpcolt.anm
