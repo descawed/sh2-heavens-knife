@@ -337,92 +337,92 @@ pub const MAX_ITEM_COUNT: u16 = 999;
 pub const NUM_USABLE_ITEMS: usize = 86;
 
 pub const ITEM_NAMES: [&'static str; NUM_USABLE_ITEMS] = [
-    "Nothing",
-    "Health drink",
-    "First-aid kit",
-    "Ampoule",
-    "Handgun",
-    "Handgun bullets",
-    "Shotgun",
-    "Shotgun shells",
-    "Hunting rifle",
-    "Rifle shells",
-    "Revolver",
-    "Revolver bullets",
-    "Hyper spray",
-    "Wooden plank",
-    "Steel pipe",
-    "Great knife",
-    "Chainsaw",
-    "Chinese cleaver",
-    "Flashlight",
-    "Radio",
-    "Photo of Mary",
-    "Letter from Mary",
-    "Laura's Letter",
-    "Videotape",
-    "Angela's knife",
-    "Dog key",
-    "Apartment gate key",
-    "Key to room 202",
-    "Clock key",
-    "Courtyard key",
-    "Fire escape key",
-    "Lyne house key",
-    "Apartment stairway key",
-    "Examination room key",
-    "Roof key",
-    "\"Purple Bull\" key",
-    "\"Lapis Eye\" key",
-    "Elevator key",
-    "Basement storeroom key",
-    "Hospital lobby key",
-    "Old bronze key",
-    "Spiral-writing key",
-    "Key of the Persecuted",
-    "Key to hotel room 312",
-    "Key to hotel room 204",
-    "Employee elevator key",
-    "Bar key",
-    "\"Fish\" key",
-    "Hotel stairway key",
-    "Canned juice",
-    "Coin [Snake]",
-    "Coin [Old Man]",
-    "Coin [Prisoner]",
-    "Piece of hair",
-    "Bent needle",
-    "Dry cell battery",
-    "Copper ring",
-    "Lead ring",
-    "Wrench",
-    "Tablet of \"The Oppressor\"",
-    "Tablet of \"Gluttonous Pig\"",
-    "Tablet of \"The Seductress\"",
-    "Horseshoe",
-    "Lighter",
-    "Wax doll",
-    "Wire cutter",
-    "Thinner",
-    "\"Little Mermaid\" music box",
-    "\"Cinderella\" music box",
-    "\"Snow White\" music box",
-    "Can opener",
-    "Light bulb",
-    "Rust-colored egg",
-    "Scarlet egg",
-    "Book: \"Lost Memories\"",
-    "Book: \"Crimson Ceremony\"",
-    "White chrism",
-    "Obsidian goblet",
-    "Blue Gem",
-    "White Board",
-    "Black Board",
-    "Red Board",
-    "Acacia key",
-    "Matches",
-    "Birthday card and present",
-    "White liquid",
+    "Nothing",                      // 0
+    "Health drink",                 // 1
+    "First-aid kit",                // 2
+    "Ampoule",                      // 3
+    "Handgun",                      // 4
+    "Handgun bullets",              // 5
+    "Shotgun",                      // 6
+    "Shotgun shells",               // 7
+    "Hunting rifle",                // 8
+    "Rifle shells",                 // 9
+    "Revolver",                     // 10
+    "Revolver bullets",             // 11
+    "Hyper spray",                  // 12
+    "Wooden plank",                 // 13
+    "Steel pipe",                   // 14
+    "Great knife",                  // 15
+    "Chainsaw",                     // 16
+    "Chinese cleaver",              // 17
+    "Flashlight",                   // 18
+    "Radio",                        // 19
+    "Photo of Mary",                // 20
+    "Letter from Mary",             // 21
+    "Laura's Letter",               // 22
+    "Videotape",                    // 23
+    "Angela's knife",               // 24
+    "Dog key",                      // 25
+    "Apartment gate key",           // 26
+    "Key to room 202",              // 27
+    "Clock key",                    // 28
+    "Courtyard key",                // 29
+    "Fire escape key",              // 30
+    "Lyne house key",               // 31
+    "Apartment stairway key",       // 32
+    "Examination room key",         // 33
+    "Roof key",                     // 34
+    "\"Purple Bull\" key",          // 35
+    "\"Lapis Eye\" key",            // 36
+    "Elevator key",                 // 37
+    "Basement storeroom key",       // 38
+    "Hospital lobby key",           // 39
+    "Old bronze key",               // 40
+    "Spiral-writing key",           // 41
+    "Key of the Persecuted",        // 42
+    "Key to hotel room 312",        // 43
+    "Key to hotel room 204",        // 44
+    "Employee elevator key",        // 45
+    "Bar key",                      // 46
+    "\"Fish\" key",                 // 47
+    "Hotel stairway key",           // 48
+    "Canned juice",                 // 49
+    "Coin [Snake]",                 // 50
+    "Coin [Old Man]",               // 51
+    "Coin [Prisoner]",              // 52
+    "Piece of hair",                // 53
+    "Bent needle",                  // 54
+    "Dry cell battery",             // 55
+    "Copper ring",                  // 56
+    "Lead ring",                    // 57
+    "Wrench",                       // 58
+    "Tablet of \"The Oppressor\"",  // 59
+    "Tablet of \"Gluttonous Pig\"", // 60
+    "Tablet of \"The Seductress\"", // 61
+    "Horseshoe",                    // 62
+    "Lighter",                      // 63
+    "Wax doll",                     // 64
+    "Wire cutter",                  // 65
+    "Thinner",                      // 66
+    "\"Little Mermaid\" music box", // 67
+    "\"Cinderella\" music box",     // 68
+    "\"Snow White\" music box",     // 69
+    "Can opener",                   // 70
+    "Light bulb",                   // 71
+    "Rust-colored egg",             // 72
+    "Scarlet egg",                  // 73
+    "Book: \"Lost Memories\"",      // 74
+    "Book: \"Crimson Ceremony\"",   // 75
+    "White chrism",                 // 76
+    "Obsidian goblet",              // 77
+    "Blue Gem",                     // 78
+    "White Board",                  // 79
+    "Black Board",                  // 80
+    "Red Board",                    // 81
+    "Acacia key",                   // 82
+    "Matches",                      // 83
+    "Birthday card and present",    // 84
+    "White liquid",                 // 85
 ];
 
 pub const fn item_name(item_id: i8) -> &'static str {
