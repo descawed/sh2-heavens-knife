@@ -147,6 +147,12 @@ unsafe extern "C" fn maria_sound_check(sound_parameters: *mut game::Sound3dParam
     let sound_parameters = std::slice::from_raw_parts_mut(sound_parameters, 3);
 
     match (animation_id, item_id) {
+        (2, game::ITEM_ID_CHAINSAW) => {
+            sound_parameters[0].unk00 = 0.40000001;
+            sound_parameters[0].start_frame = 4;
+
+            11025 // no symbolic constant for this because I don't know what it is
+        }
         (8 | 9 | 10, game::ITEM_ID_GREAT_KNIFE) => {
             sound_parameters[0].unk00 = 0.30000001;
             sound_parameters[0].start_frame = 5;
@@ -876,6 +882,12 @@ fn main(reason: u32) -> Result<()> {
 
         let grunt_sound_call = patch::get_call_target(grunt_sound_call_check_address) as usize;
 
+        let james_extra_weapon_sound_logic = james_sounds_switch_default.offset(942);
+        patch::assert_byte(james_extra_weapon_sound_logic, 0x80)?; // cmp
+
+        let maria_sound_return = maria_sounds_switch_default.offset(490);
+        patch::assert_byte(maria_sound_return, 0x83)?; // add
+
         // initialize static data
         GLOBAL.init(player_character_flag_address,
             weapon_data_address, grunt_sound_call,
@@ -1009,7 +1021,7 @@ fn main(reason: u32) -> Result<()> {
         patch::patch(chainsaw_kg1_push_address, &patch::push(revolver_kg1_file_address as usize))?;
 
         // patch weapon sound logic
-        log::info!("Patching weapon sound logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", james_action_sounds_switch as usize, maria_action_sounds_switch as usize, james_sounds_switch_default as usize, maria_sounds_switch_default as usize);
+        log::info!("Patching weapon sound logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}, {:#08X}", james_action_sounds_switch as usize, maria_action_sounds_switch as usize, james_sounds_switch_default as usize, maria_sounds_switch_default as usize, maria_sound_return as usize);
 
         // add in weapon sounds for Maria's weapons when wielded by James
         patch::set_trampoline_conditional(&mut GLOBAL.james_action_sound_thunk, 0, james_sounds_switch_default as usize)?;
@@ -1030,6 +1042,10 @@ fn main(reason: u32) -> Result<()> {
         patch::set_trampoline(&mut GLOBAL.maria_action_sound_thunk, 58, maria_sounds_original as usize)?;
         let maria_sound_check_jump = patch::jmp(maria_action_sounds_switch as usize, &raw const GLOBAL.maria_action_sound_thunk as usize);
         patch::patch(maria_action_sounds_switch, &maria_sound_check_jump)?;
+
+        // after Maria's function plays her sounds, jump to the end of James' function, which has extra logic for the chainsaw and hyper spray
+        patch::set_trampoline(&mut GLOBAL.maria_sound_return_thunk, 4, james_extra_weapon_sound_logic as usize)?;
+        patch::patch(maria_sound_return, &patch::jmp(maria_sound_return as usize, &raw const GLOBAL.maria_sound_return_thunk as usize))?;
 
         // patch weapon transform logic
         log::info!("Patching equipped weapon transform logic at address {:#08X}", rotate_bone_func_address as usize);
