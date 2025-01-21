@@ -70,6 +70,12 @@ const AFTER_DESCRIPTION_CALL: [u8; 12] = [
 const MENU_INPUT_LOOP: [u8; 8] = [
     0x09, 0x00, 0x00, 0x00, 0x83, 0xC4, 0x0C, 0x89,
 ];
+const MARIA_SET_WEAPON_POSE: [u8; 6] = [
+    0x50, 0x51, 0x6A, 0x06, 0x52, 0xE8,
+];
+const JAMES_SET_WEAPON_POSE: [u8; 9] = [
+    0x83, 0xF8, 0x08, 0x0F, 0x87, 0x51, 0x01, 0x00, 0x00,
+];
 
 static mut GLOBAL: PersistentData = PersistentData::new();
 static mut CONFIG_INTERFACE: config::UserInterface = config::UserInterface::new(config::Config::new());
@@ -507,6 +513,24 @@ unsafe extern "C" fn find_maria_weapon_info() -> isize {
     GLOBAL.get_maria_weapon_offset()
 }
 
+unsafe extern "C" fn get_weapon_index_for_maria_pose() -> u32 {
+    // use revolver pose for all ranged weapons and cleaver pose for all melee weapons
+    match GLOBAL.equipped_item_id() {
+        game::ITEM_ID_HANDGUN | game::ITEM_ID_SHOTGUN | game::ITEM_ID_RIFLE | game::ITEM_ID_REVOLVER | game::ITEM_ID_HYPER_SPRAY => 9,
+        game::ITEM_ID_WOODEN_PLANK | game::ITEM_ID_STEEL_PIPE | game::ITEM_ID_CHAINSAW | game::ITEM_ID_GREAT_KNIFE | game::ITEM_ID_CLEAVER => 10,
+        _ => 0,
+    }
+}
+
+unsafe extern "C" fn get_weapon_index_for_james_pose() -> u32 {
+    // treat revolver as handgun and cleaver as wooden plank
+    match GLOBAL.equipped_item_id() {
+        game::ITEM_ID_REVOLVER => 1,
+        game::ITEM_ID_CLEAVER => 5,
+        equipped_item => game::get_weapon_index(equipped_item) as u32,
+    }
+}
+
 fn open_log(level: LevelFilter) -> Result<()> {
     let log_file = File::create("knife.log")?;
     WriteLogger::init(level, Config::default(), log_file)?;
@@ -650,6 +674,8 @@ fn main(reason: u32) -> Result<()> {
         Some(after_description_call_address),
         Some(menu_input_loop_address),
         Some(main_menu_func1_address),
+        Some(maria_set_pose_address),
+        Some(james_set_pose_address),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
@@ -670,6 +696,8 @@ fn main(reason: u32) -> Result<()> {
             &AFTER_DESCRIPTION_CALL,
             &MENU_INPUT_LOOP,
             &MAIN_MENU_FUNC1,
+            &MARIA_SET_WEAPON_POSE,
+            &JAMES_SET_WEAPON_POSE,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -679,7 +707,8 @@ fn main(reason: u32) -> Result<()> {
     log::debug!(
         "Found tex ref data at {:#08X}, pause menu at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
         draw msg call at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
-        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}, main menu func 1 at {:#08X}",
+        handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}, \
+        main menu func 1 at {:#08X}, Maria set weapon pose {:#08X}, James set weapon pose {:#08X}",
         tex_ref_call_address as usize,
         pause_menu_address as usize,
         james_icon_draw_loop_address as usize,
@@ -698,6 +727,8 @@ fn main(reason: u32) -> Result<()> {
         after_description_call_address as usize,
         menu_input_loop_address as usize,
         main_menu_func1_address as usize,
+        maria_set_pose_address as usize,
+        james_set_pose_address as usize,
     );
 
     unsafe {
@@ -887,6 +918,12 @@ fn main(reason: u32) -> Result<()> {
 
         let maria_sound_return = maria_sounds_switch_default.offset(490);
         patch::assert_byte(maria_sound_return, 0x83)?; // add
+
+        let maria_pose_weapon_check = maria_set_pose_address.offset(-0x68);
+        patch::assert_byte(maria_pose_weapon_check, 0x0F)?; // movzx
+
+        let james_pose_weapon_check = james_set_pose_address.offset(-7);
+        patch::assert_byte(james_pose_weapon_check, 0x0F)?; // movzx
 
         // initialize static data
         GLOBAL.init(player_character_flag_address,
@@ -1098,6 +1135,18 @@ fn main(reason: u32) -> Result<()> {
         // our patch overlaps two instructions totaling 6 bytes, so insert a nop at the end
         let call_padded = [item_pickup_text_call[0], item_pickup_text_call[1], item_pickup_text_call[2], item_pickup_text_call[3], item_pickup_text_call[4], 0x90];
         patch::patch(description_func as *const c_void, &call_padded)?;
+
+        // patch logic for selecting hand pose based on equipped weapon
+        log::info!("Patching weapon pose logic at addresses {:#08X}, {:#08X}", maria_pose_weapon_check as usize, james_pose_weapon_check as usize);
+
+        let maria_pose_call = patch::call(maria_pose_weapon_check as usize, get_weapon_index_for_maria_pose as usize);
+        // pad with nops to overwrite 7-byte movzx
+        let call_padded = [maria_pose_call[0], maria_pose_call[1], maria_pose_call[2], maria_pose_call[3], maria_pose_call[4], 0x90, 0x90];
+        patch::patch(maria_pose_weapon_check, &call_padded)?;
+
+        let james_pose_call = patch::call(james_pose_weapon_check as usize, get_weapon_index_for_james_pose as usize);
+        let call_padded = [james_pose_call[0], james_pose_call[1], james_pose_call[2], james_pose_call[3], james_pose_call[4], 0x90, 0x90];
+        patch::patch(james_pose_weapon_check, &call_padded)?;
     }
 
     log::info!("All patches applied successfully");

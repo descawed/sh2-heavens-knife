@@ -466,6 +466,22 @@ pub const fn item_count_must_be_nonzero(item_id: i8) -> bool {
         )
 }
 
+pub const fn get_weapon_index(item_id: i8) -> u8 {
+    match item_id {
+        ITEM_ID_HANDGUN => 1,
+        ITEM_ID_SHOTGUN => 2,
+        ITEM_ID_RIFLE => 3,
+        ITEM_ID_HYPER_SPRAY => 4,
+        ITEM_ID_WOODEN_PLANK => 5,
+        ITEM_ID_STEEL_PIPE => 6,
+        ITEM_ID_CHAINSAW => 7,
+        ITEM_ID_GREAT_KNIFE => 8,
+        ITEM_ID_REVOLVER => 9,
+        ITEM_ID_CLEAVER => 10,
+        _ => 0,
+    }
+}
+
 pub const ICON_COORDS: [IconCoords; NUM_ITEMS] = [
     IconCoords(20, 0, 97),
     IconCoords(123, 0, 225),
