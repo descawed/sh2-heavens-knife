@@ -117,9 +117,9 @@ pub struct Animation {
 pub struct Inventory {
     pub flags: [u32; 3],
     pub counts: [u16; 13], // only tracks counts for items where the count is significant
-    pub unk26: u8,
-    pub unk27: u8,
-    pub unk28: u8,
+    pub is_flashlight_on: bool,
+    pub is_radio_on: bool,
+    pub radio_volume: u8,
     pub equipped_item: i8,
     pub unk2a: u16,
     pub unk2c: f32,
@@ -137,9 +137,9 @@ impl Inventory {
         Self {
             flags: [0; 3],
             counts: [0; 13],
-            unk26: 0,
-            unk27: 0,
-            unk28: 0,
+            is_flashlight_on: false,
+            is_radio_on: false,
+            radio_volume: 0,
             equipped_item: ITEM_ID_NOTHING,
             unk2a: 0,
             unk2c: 0.0,
@@ -237,9 +237,9 @@ impl Inventory {
     pub const fn clear(&mut self) {
         self.flags = [0; 3];
         self.counts = [0; 13];
-        self.unk26 = 0;
-        self.unk27 = 0;
-        self.unk28 = 0;
+        self.is_flashlight_on = false;
+        self.is_radio_on = false;
+        self.radio_volume = 0;
         self.equipped_item = 0;
         self.unk2a = 0;
         self.unk2c = 0.0;
@@ -697,6 +697,7 @@ mod tests {
         assert_eq!(size_of::<AnimationDescription>(), 12);
     }
 
+    #[test]
     fn inventory_size() {
         assert_eq!(size_of::<Inventory>(), 0x3c);
     }
@@ -706,9 +707,9 @@ mod tests {
         let mut inventory = Inventory {
             flags: [32784, 0, 0],
             counts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            unk26: 0,
-            unk27: 0,
-            unk28: 0,
+            is_flashlight_on: false,
+            is_radio_on: false,
+            radio_volume: 0,
             equipped_item: 10,
             unk2a: 0,
             unk2c: 0.0,

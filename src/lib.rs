@@ -424,8 +424,8 @@ unsafe extern "C" fn init_inventory_hook() {
     let inventory = GLOBAL.inventory();
     inventory.clear();
 
-    let is_maria = GLOBAL.is_player_maria();
-    match CONFIG_INTERFACE.starting_inventory(!is_maria) {
+    let is_james = !GLOBAL.is_player_maria();
+    match CONFIG_INTERFACE.starting_inventory(is_james) {
         Some(starting_inventory) => {
             for (item_id, count) in starting_inventory.iter_items() {
                 if let Some(count) = count {
@@ -448,23 +448,24 @@ unsafe extern "C" fn init_inventory_hook() {
         }
         None => {
             // assign normal starting inventory
-            if is_maria {
+            if is_james {
+                inventory.add_item(game::ITEM_ID_PHOTO_OF_MARY);
+                GLOBAL.add_item_to_inventory(game::ITEM_ID_LETTER_FROM_MARY);
+            } else {
                 inventory.add_item(game::ITEM_ID_REVOLVER);
                 inventory.set_count(game::ITEM_ID_REVOLVER, 1);
                 GLOBAL.inc_item_count();
-            } else {
-                inventory.add_item(game::ITEM_ID_PHOTO_OF_MARY);
-                GLOBAL.add_item_to_inventory(game::ITEM_ID_LETTER_FROM_MARY);
             }
         }
     }
 
-    if !is_maria {
-        // I don't know what these do, but the original code sets them for James, so we will, too
-        inventory.unk26 = 1;
-        inventory.unk27 = 1;
-        inventory.unk28 = 10;
-    }
+    // these are the game's default settings for James. because the flashlight isn't fully working
+    // for Maria at the moment, we'll default it to off for her. for the radio, we'll go ahead and
+    // default it to on and set the normal default volume, since it doesn't have any affect if you
+    // don't have the radio anyway.
+    inventory.is_flashlight_on = is_james;
+    inventory.is_radio_on = true;
+    inventory.radio_volume = 10;
 
     GLOBAL.enable_item_override();
 }
