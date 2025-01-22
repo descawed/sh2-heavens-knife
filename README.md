@@ -126,9 +126,8 @@ screenshot above, I've mapped the handgun to the revolver and handgun bullets to
 picking up the handgun will give me the revolver and picking up handgun bullets will give me revolver bullets - in
 other words, this basically replaces the handgun with the revolver in James' scenario.
 
-It's also possible to map an item to nothing, effectively disabling pickups of that item. This is a little janky at the
-moment - the message saying you picked up the original item will still pop, and this will result in you getting a blank
-space in your inventory instead of the actual item. I hope to improve this in the future.
+It's also possible to map an item to nothing, effectively disabling pickups of that item. No message is displayed when
+you pick up a disabled item.
 
 **Note**: Be aware that the actual 3D model of the item in the world will not change. However, when you pick them item
 up, you will still get the mapped item you selected instead of the item you see, and the message will reflect that.

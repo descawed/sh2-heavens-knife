@@ -486,6 +486,12 @@ unsafe extern "C" fn item_pickup_text_hook(message_file: *mut *const u16, messag
         return;
     }
 
+    if new_item == game::ITEM_ID_NOTHING {
+        // the game checks for a null message file, so we can set it null to suppress the message
+        *message_file = std::ptr::null();
+        return;
+    }
+
     let Some((override_file, override_id)) = GLOBAL.get_message_for_item(new_item, language) else {
         return;
     };
