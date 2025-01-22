@@ -25,7 +25,7 @@ pub struct PersistentData {
     pub maria_action_sound_thunk: [u8; 63],
     pub rotate_bone_transform_thunk: [u8; 37],
     pub item_description_thunk: [u8; 24],
-    pub add_item_thunk: [u8; 11],
+    pub add_item_thunk: [u8; 16],
     pub menu_input_loop_thunk: [u8; 26],
     pub pause_menu_draw_thunk: [u8; 13],
     pub main_menu_thunk: [u8; 22],
@@ -150,7 +150,10 @@ impl PersistentData {
             add_item_thunk: [
                 0xE8, 0, 0, 0, 0, // call <target>
                 0x59, // pop ecx
-                0x56, // push esi
+                0x85, 0xC0, // test eax, eax
+                0x75, 0x01, // jnz continue
+                0xC3, // ret
+                0x56, // continue: push esi
                 0x89, 0xC6, // mov esi, eax
                 0xFF, 0xE1, // jmp ecx
             ],
