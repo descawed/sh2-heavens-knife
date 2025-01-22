@@ -76,6 +76,27 @@ const MARIA_SET_WEAPON_POSE: [u8; 6] = [
 const JAMES_SET_WEAPON_POSE: [u8; 9] = [
     0x83, 0xF8, 0x08, 0x0F, 0x87, 0x51, 0x01, 0x00, 0x00,
 ];
+const FLASHLIGHT_CHECK: [u8; 7] = [
+    0x83, 0xC4, 0x20, 0x83, 0xC4, 0x70, 0xC3,
+];
+const FLASHLIGHT_CHAR_CHECK1: [u8; 9] = [
+    0x0F, 0xBF, 0x46, 0x10, 0x3D, 0x00, 0x01, 0x00, 0x00,
+];
+const FLASHLIGHT_CHAR_CHECK2: [u8; 9] = [
+    0x0F, 0xBF, 0x47, 0x10, 0x3D, 0x00, 0x01, 0x00, 0x00,
+];
+const FLASHLIGHT_TRANSFORM_RETURN: [u8; 8] = [
+    0x5D, 0x81, 0xC4, 0xF8, 0x01, 0x00, 0x00, 0xC3,
+];
+
+const FLASHLIGHT_CHAR_CHECK_PATCH: [u8; 13] = [
+    0x90, // nop
+    0x50, // push eax
+    0xE8, 0, 0, 0, 0, // call <target>
+    0x83, 0xC4, 0x04, // add esp, 4
+    0x84, 0xC0, // test al, al
+    0x74, // jz
+];
 
 static mut GLOBAL: PersistentData = PersistentData::new();
 static mut CONFIG_INTERFACE: config::UserInterface = config::UserInterface::new(config::Config::new());
@@ -531,6 +552,40 @@ unsafe extern "C" fn get_weapon_index_for_james_pose() -> u32 {
     }
 }
 
+unsafe extern "C" fn should_use_maria_flashlight_calc() -> u32 {
+    // the game code has a check for Maria in part of the code that does calculations related to the
+    // flashlight. Maria can normally never get the flashlight, but I assume there must be some
+    // situation where this code is used since they bothered to write it. however, when we let this
+    // block run when turning on the flashlight as Maria, the light doesn't appear (perhaps it's
+    // placed in an odd spot where it's not visible). so as a compromise, we'll override this code,
+    // but only when the flashlight is on
+    // side note: this function logically returns bool, but the game code does a `test eax, eax`,
+    // and I'm not sure if Rust sets the whole eax register when returning a bool or just does like
+    // a `mov al, 1`, so we're returning a u32 to be safe
+    if GLOBAL.is_player_maria() && !GLOBAL.is_flashlight_on() {
+        1
+    } else {
+        0
+    }
+}
+
+unsafe extern "C" fn is_player_character(char_id: i32) -> bool {
+    matches!(char_id, game::JAMES_ID1 | game::JAMES_ID2 | game::MARIA_ID)
+}
+
+unsafe extern "C" fn adjust_flashlight_vector() {
+    if !GLOBAL.is_player_maria() {
+        return;
+    }
+
+    // for some reason, the flashlight points off to the side for Maria, so we'll rotate it to face
+    // the right direction
+    let vec = GLOBAL.flashlight_vector();
+    let x = vec[0];
+    vec[0] = vec[2];
+    vec[2] = -x;
+}
+
 fn open_log(level: LevelFilter) -> Result<()> {
     let log_file = File::create("knife.log")?;
     WriteLogger::init(level, Config::default(), log_file)?;
@@ -676,6 +731,10 @@ fn main(reason: u32) -> Result<()> {
         Some(main_menu_func1_address),
         Some(maria_set_pose_address),
         Some(james_set_pose_address),
+        Some(flashlight_check_address),
+        Some(flashlight_char_check1_address),
+        Some(flashlight_char_check2_address),
+        Some(flashlight_transform_return_address),
     ] = searcher.find_bytes(
         &[
             &tex_ref_data,
@@ -698,6 +757,10 @@ fn main(reason: u32) -> Result<()> {
             &MAIN_MENU_FUNC1,
             &MARIA_SET_WEAPON_POSE,
             &JAMES_SET_WEAPON_POSE,
+            &FLASHLIGHT_CHECK,
+            &FLASHLIGHT_CHAR_CHECK1,
+            &FLASHLIGHT_CHAR_CHECK2,
+            &FLASHLIGHT_TRANSFORM_RETURN,
         ],
         Some(PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE),
         sh2pc,
@@ -708,7 +771,8 @@ fn main(reason: u32) -> Result<()> {
         "Found tex ref data at {:#08X}, pause menu at {:#08X}, James icon draw loop at {:#08X}, Maria icon draw loop at {:#08X}, weapon assert at {:#08X}, weapon assert 2 at {:#08X}, \
         draw msg call at {:#08X}, James action sounds at {:#08X}, Maria action sounds at {:#08X}, melee grunt sound call at {:#08X}, sound param select at {:#08X}, \
         handgun model push at {:#08X}, chainsaw kg1 push at {:#08X}, rotate bone transform at {:#08X}, init inventory at {:#08X}, after description call at {:#08X}, menu input loop at {:#08X}, \
-        main menu func 1 at {:#08X}, Maria set weapon pose {:#08X}, James set weapon pose {:#08X}",
+        main menu func 1 at {:#08X}, Maria set weapon pose at {:#08X}, James set weapon pose at {:#08X}, flashlight check at {:#08X}, flashlight character check at {:#08X}, flashlight character check 2 at {:#08X}, \
+        flashlight transform return at {:#08X}",
         tex_ref_call_address as usize,
         pause_menu_address as usize,
         james_icon_draw_loop_address as usize,
@@ -729,6 +793,10 @@ fn main(reason: u32) -> Result<()> {
         main_menu_func1_address as usize,
         maria_set_pose_address as usize,
         james_set_pose_address as usize,
+        flashlight_check_address as usize,
+        flashlight_char_check1_address as usize,
+        flashlight_char_check2_address as usize,
+        flashlight_transform_return_address as usize,
     );
 
     unsafe {
@@ -786,12 +854,20 @@ fn main(reason: u32) -> Result<()> {
         let menu_input_loop_start = menu_input_loop_address.offset(-2210); // yikes
         patch::assert_byte(menu_input_loop_start, 0x0F)?; // ja
 
+        let is_flashlight_on_call = flashlight_check_address.offset(29);
+        patch::assert_byte(is_flashlight_on_call, 0xE8)?; // call
+
+        let flashlight_calc_call = flashlight_check_address.offset(132);
+        patch::assert_byte(flashlight_calc_call, 0xE8)?; // call
+
         let james_sounds_switch_default = patch::get_conditional_jump_target(james_action_sounds_switch);
         let maria_sounds_switch_default = patch::get_conditional_jump_target(maria_action_sounds_switch);
         let add_item_to_inventory = patch::get_call_target(add_inventory_call_address) as usize;
         let inc_item_count = patch::get_call_target(inc_item_count_address) as usize;
         let description_func = patch::get_call_target(description_call_address) as usize;
         let main_menu_original_call = patch::get_call_target(main_menu_dispatch_func) as usize;
+        let is_flashlight_on = patch::get_call_target(is_flashlight_on_call) as usize;
+        let flashlight_calc = patch::get_call_target(flashlight_calc_call) as usize;
         // make sure the addresses look reasonable
         if !searcher.find_addresses_exec(
             &[
@@ -801,13 +877,15 @@ fn main(reason: u32) -> Result<()> {
                 inc_item_count,
                 description_func,
                 main_menu_original_call,
+                is_flashlight_on,
+                flashlight_calc,
             ],
             sh2pc)?.iter().all(|f| *f) {
             bail!(
                 "One or more of James sound switch default {:#08X}, Maria sound switch default {:#08X}, add inventory {:#08X}, inc item count {:#08X}, \
-                description func {:#08X}, main menu original call {:#08X} don't look right",
+                description func {:#08X}, main menu original call {:#08X}, flashlight on call {:#08X}, flashlight calc {:#08X} don't look right",
                 james_sounds_switch_default as usize, maria_sounds_switch_default as usize, add_item_to_inventory, inc_item_count, description_func,
-                main_menu_original_call,
+                main_menu_original_call, is_flashlight_on, flashlight_calc,
             );
         };
 
@@ -874,12 +952,14 @@ fn main(reason: u32) -> Result<()> {
         let sound_param_data_address = std::ptr::read_unaligned(sound_parameter_select_address.offset(-4) as *const *mut u8);
         let inventory_address = std::ptr::read_unaligned(init_inventory_address.offset(8) as *const *mut game::Inventory);
         let main_menu_state_address = std::ptr::read_unaligned(main_menu_dispatch_func.offset(6) as *const *mut i32);
+        // this points to the z-component of the vector, so offset -2 to get to the beginning
+        let flashlight_vec_address = std::ptr::read_unaligned(flashlight_transform_return_address.offset(-4) as *const *mut f32).offset(-2);
         // make sure the addresses look reasonable
         if !searcher.find_addresses_write(
-            &[player_character_flag_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize]
-            , sh2pc)?.iter().all(|&a| a) {
-            bail!("One or more of the following addresses don't look right: player character flag address {:#08X}, sound param data address {:#08X}, inventory address {:#08X}, main menu state address {:#08X}",
-                player_character_flag_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize,
+            &[player_character_flag_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize, flashlight_vec_address as usize],
+            sh2pc)?.iter().all(|&a| a) {
+            bail!("One or more of the following addresses don't look right: player character flag address {:#08X}, sound param data address {:#08X}, inventory address {:#08X}, main menu state address {:#08X}, flashlight vec address {:#08X}",
+                player_character_flag_address as usize, sound_param_data_address as usize, inventory_address as usize, main_menu_state_address as usize, flashlight_vec_address as usize,
             );
         };
 
@@ -925,11 +1005,24 @@ fn main(reason: u32) -> Result<()> {
         let james_pose_weapon_check = james_set_pose_address.offset(-7);
         patch::assert_byte(james_pose_weapon_check, 0x0F)?; // movzx
 
+        let maria_flashlight_check = (flashlight_calc + 0x4f) as *const c_void;
+        patch::assert_byte(maria_flashlight_check, 0xE8)?; // call
+
+        let flashlight_char_patch1 = flashlight_char_check1_address.offset(4);
+        patch::assert_byte(flashlight_char_patch1, 0x3D)?; // cmp
+
+        let flashlight_char_patch2 = flashlight_char_check2_address.offset(4);
+        patch::assert_byte(flashlight_char_patch2, 0x3D)?; // cmp
+
+        let flashlight_transform_patch = flashlight_transform_return_address.offset(7);
+        // there are 4 bytes of nops after the return, giving us enough room to patch a jump
+        // no point asserting since this is still in our search string
+
         // initialize static data
-        GLOBAL.init(player_character_flag_address,
-            weapon_data_address, grunt_sound_call,
+        GLOBAL.init(player_character_flag_address, weapon_data_address, grunt_sound_call,
             sound_param_data_address, inc_item_count, add_item_to_inventory,
-            inventory_address, new_game_plus_flag_func, main_menu_state_address)?;
+            inventory_address, new_game_plus_flag_func, main_menu_state_address,
+            is_flashlight_on, flashlight_vec_address)?;
         CONFIG_INTERFACE.set_funcs(draw_message_func as usize);
 
         let icon_coords_addr_bytes = (icon_coords_ptr as usize).to_le_bytes();
@@ -1139,14 +1232,35 @@ fn main(reason: u32) -> Result<()> {
         // patch logic for selecting hand pose based on equipped weapon
         log::info!("Patching weapon pose logic at addresses {:#08X}, {:#08X}", maria_pose_weapon_check as usize, james_pose_weapon_check as usize);
 
+        // patch Maria pose logic to account for the possibility that she has a James weapon equipped
         let maria_pose_call = patch::call(maria_pose_weapon_check as usize, get_weapon_index_for_maria_pose as usize);
         // pad with nops to overwrite 7-byte movzx
         let call_padded = [maria_pose_call[0], maria_pose_call[1], maria_pose_call[2], maria_pose_call[3], maria_pose_call[4], 0x90, 0x90];
         patch::patch(maria_pose_weapon_check, &call_padded)?;
 
+        // patch James pose logic to account for the possibility that he has a Maria weapon equipped
         let james_pose_call = patch::call(james_pose_weapon_check as usize, get_weapon_index_for_james_pose as usize);
         let call_padded = [james_pose_call[0], james_pose_call[1], james_pose_call[2], james_pose_call[3], james_pose_call[4], 0x90, 0x90];
         patch::patch(james_pose_weapon_check, &call_padded)?;
+
+        // patches to make the flashlight work for Maria
+        log::info!("Patching flashlight checks at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}", maria_flashlight_check as usize, flashlight_char_patch1 as usize, flashlight_char_patch2 as usize, flashlight_transform_patch as usize);
+
+        // conditionally skip logic that uses a weird flashlight position for Maria, causing the light not to appear
+        patch::patch(maria_flashlight_check, &patch::call(maria_flashlight_check as usize, should_use_maria_flashlight_calc as usize))?;
+
+        // patch the first check that only runs the flashlight code for James
+        patch::patch(flashlight_char_patch1, &FLASHLIGHT_CHAR_CHECK_PATCH)?;
+        let call_address = flashlight_char_patch1.offset(2);
+        patch::patch(call_address, &patch::call(call_address as usize, is_player_character as usize))?;
+
+        // patch the second check that only runs the flashlight code for James
+        patch::patch(flashlight_char_patch2, &FLASHLIGHT_CHAR_CHECK_PATCH)?;
+        let call_address = flashlight_char_patch2.offset(2);
+        patch::patch(call_address, &patch::call(call_address as usize, is_player_character as usize))?;
+
+        // rotate the flashlight to point the right way for Maria
+        patch::patch(flashlight_transform_patch, &patch::jmp(flashlight_transform_patch as usize, adjust_flashlight_vector as usize))?;
     }
 
     log::info!("All patches applied successfully");

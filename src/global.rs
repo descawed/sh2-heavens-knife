@@ -34,13 +34,15 @@ pub struct PersistentData {
     inc_item_count: Option<unsafe extern "C" fn()>,
     add_item_to_inventory: Option<unsafe extern "C" fn(item_id: i32)>,
     set_new_game_plus_item_flag: Option<unsafe extern "C" fn(flag: u32)>,
+    unk_grunt_sound_value: Option<unsafe extern "C" fn() -> i32>,
+    is_flashlight_on: Option<unsafe extern "C" fn() -> bool>,
     james_weapon_animations: WeaponAnimationFiles,
     maria_weapon_animations: WeaponAnimationFiles,
     weapon_info: *mut game::WeaponInfo,
-    unk_grunt_sound_value: Option<unsafe extern "C" fn() -> i32>,
     sound_param_data: *mut u8,
     inventory: *mut game::Inventory,
     main_menu_state: *mut i32,
+    flashlight_vector: *mut f32,
     item_messages: [game::MessageFile; game::NUM_LANGUAGES],
     enable_item_override: bool,
 }
@@ -192,6 +194,8 @@ impl PersistentData {
             inc_item_count: None,
             add_item_to_inventory: None,
             set_new_game_plus_item_flag: None,
+            unk_grunt_sound_value: None,
+            is_flashlight_on: None,
             james_weapon_animations: WeaponAnimationFiles {
                 handgun: FileInfo::new(c"data/chr/jms/jms_wphand.anm"),
                 shotgun: FileInfo::new(c"data/chr/jms/jms_wpshot.anm"),
@@ -217,10 +221,10 @@ impl PersistentData {
                 cleaver: FileInfo::new(c"data/chr2/mar/xmar_wpknif.anm"),
             },
             weapon_info: std::ptr::null_mut(),
-            unk_grunt_sound_value: None,
             sound_param_data: std::ptr::null_mut(),
             inventory: std::ptr::null_mut(),
             main_menu_state: std::ptr::null_mut(),
+            flashlight_vector: std::ptr::null_mut(),
             item_messages: [const { game::MessageFile::new() }; game::NUM_LANGUAGES],
             enable_item_override: true,
         }
@@ -229,16 +233,19 @@ impl PersistentData {
     pub fn init(&mut self, player_character_flag: *const u8,
             weapon_info: *mut game::WeaponInfo, grunt_sound_selector: usize, sound_param_data: *mut u8,
             inc_item_count: usize, add_item_to_inventory: usize, inventory: *mut game::Inventory,
-            set_new_game_plus_item_flag: usize, main_menu_state: *mut i32) -> Result<()> {
+            set_new_game_plus_item_flag: usize, main_menu_state: *mut i32,
+            is_flashlight_on: usize, flashlight_vector: *mut f32) -> Result<()> {
         self.player_character_flag = player_character_flag;
         self.inc_item_count = Some(unsafe { std::mem::transmute(inc_item_count) });
         self.add_item_to_inventory = Some(unsafe { std::mem::transmute(add_item_to_inventory) });
         self.set_new_game_plus_item_flag = Some(unsafe { std::mem::transmute(set_new_game_plus_item_flag) });
-        self.weapon_info = weapon_info;
         self.unk_grunt_sound_value = Some(unsafe { std::mem::transmute(grunt_sound_selector) });
+        self.is_flashlight_on = Some(unsafe { std::mem::transmute(is_flashlight_on) });
+        self.weapon_info = weapon_info;
         self.sound_param_data = sound_param_data;
         self.inventory = inventory;
         self.main_menu_state = main_menu_state;
+        self.flashlight_vector = flashlight_vector;
 
         self.load_item_messages()
     }
@@ -481,5 +488,13 @@ impl PersistentData {
 
     pub unsafe fn get_main_menu_state(&self) -> i32 {
         *self.main_menu_state
+    }
+
+    pub unsafe fn is_flashlight_on(&self) -> bool {
+        self.is_flashlight_on.unwrap()()
+    }
+
+    pub unsafe fn flashlight_vector(&self) -> &'static mut [f32] {
+        std::slice::from_raw_parts_mut(self.flashlight_vector, 3)
     }
 }

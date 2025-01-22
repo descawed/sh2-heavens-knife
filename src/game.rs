@@ -290,6 +290,10 @@ pub const DEFAULT_MELEE_ATTACK_SOUND_ID: u32 = 11027;
 pub const JAMES_GRUNT_SOUND_ID: u32 = 11018;
 pub const MARIA_GRUNT_SOUND_ID: u32 = 17030;
 
+pub const JAMES_ID1: i32 = 256;
+pub const JAMES_ID2: i32 = 257;
+pub const MARIA_ID: i32 = 270;
+
 /*
   weaponItemIds[0] = -1;                             // none
   weaponItemIds[1] = 4;                              // handgun
