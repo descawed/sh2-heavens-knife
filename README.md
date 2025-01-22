@@ -92,7 +92,7 @@ With that out of the way, the main configuration menu has the following options:
   for details.
 - **Exit** - This option exits the configuration menu.
 
-More details explanations of the various sub-menus follow below.
+More detailed explanations of the various sub-menus follow below.
 
 ### Inventory
 
