@@ -18,8 +18,8 @@ game and Enhanced Edition already installed before you proceed.
 
    ![ASI plugin checkbox](assets/sh2ee_asi.png)
 4. If everything has been done correctly, the next time you launch the game, you'll see a message from the mod in the
-   bottom left corner of the main menu. By default, the mod will be loaded but turned off. You can enable it and change
-   settings from the [configuration menu](#Configuration).
+   bottom left corner of the main menu. The default settings of the mod will equip your character with the great knife
+   when you start a new game. You can change these settings from the [configuration menu](#Configuration).
   
    ![Main menu with mod message](assets/knife_main_menu.png)
 
@@ -47,7 +47,10 @@ items:
   revolver instead, and every handgun ammo pickup in the game would give you revolver ammo instead. This would let you
   play through the main scenario with Maria's revolver instead of the normal handgun.
 
-These settings can be controlled through the in-game configuration menu.
+These settings can be controlled through the in-game configuration menu. The default settings for starting inventory
+start your character with the great knife and, for James, the photo of Mary and letter from Mary. The default settings
+for item mappings have no overrides - all item pickups will function as usual. All of these settings can be changed
+from the configuration menu.
 
 ### Configuration
 

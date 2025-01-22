@@ -7,7 +7,7 @@
 startup = "remember_last"
 
 # Whether the mod was turned on the last time the game was run. Only relevant when using startup = "remember_last".
-was_enabled_on_last_run = false
+was_enabled_on_last_run = true
 
 # Whether to allow the inventory editor to be used during gameplay. If false, only the starting inventory can be edited
 # just before starting a new game.
