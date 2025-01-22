@@ -129,9 +129,6 @@ screenshot above, I've mapped the handgun to the revolver and handgun bullets to
 picking up the handgun will give me the revolver and picking up handgun bullets will give me revolver bullets - in
 other words, this basically replaces the handgun with the revolver in James' scenario.
 
-It's also possible to map an item to nothing, effectively disabling pickups of that item. No message is displayed when
-you pick up a disabled item.
-
 **Note**: Be aware that the actual 3D model of the item in the world will not change. However, when you pick them item
 up, you will still get the mapped item you selected instead of the item you see, and the message will reflect that.
 For example, here's a screenshot from where I mapped the cleaver to the wooden plank. We still see the cleaver on the
@@ -140,9 +137,17 @@ my inventory.
 
 ![Cleaver mapped to plank](assets/knife_cleaver_plank.png)
 
-Also note that I haven't bothered to prevent mapping ammo items to weapons, meaning you can use this to get multiple
-pickups of the same weapon. For melee weapons, this is harmless but pointless. For guns, this will add to the number of
-bullets loaded in the gun beyond the normal maximum, which may have interesting and/or amusing applications.
+It's also possible to map an item to nothing, effectively disabling pickups of that item. For example, in the menu
+screenshot above, the hunting rifle and rifle shells are mapped to nothing, meaning I won't be able to obtain either of
+those items. Like normal mappings, the 3D model of the item will still appear in the world, but when you pick it up,
+there will be no message and nothing will be added to your inventory.
+
+I haven't bothered to prevent mapping ammo items to weapons, meaning you can use this to get multiple pickups of the
+same weapon. For melee weapons, this is harmless but pointless. For guns, this will add to the number of bullets loaded
+in the gun beyond the normal maximum, which may have interesting and/or amusing applications.
+
+Lastly, note that the inventory editor is not affected by item mapping. If you give yourself a particular item in the
+inventory editor, you will get that exact item even if you have it mapped to something else in this menu.
 
 ### Settings
 
