@@ -988,7 +988,8 @@ impl UserInterface {
                     };
 
                     for (i, &mapped_item) in mapping.iter().enumerate() {
-                        let option = ItemMapperOption::from_item_id((i as i8) + game::ITEM_ID_HANDGUN);
+                        let original_item_id = (i as i8) + game::ITEM_ID_HANDGUN;
+                        let option = ItemMapperOption::from_item_id(original_item_id);
                         if option == selected_option {
                             builder.control(ControlCode::Blue);
                         }
@@ -997,6 +998,8 @@ impl UserInterface {
                         builder.text(": ");
                         if mapped_item == game::ITEM_ID_NOTHING {
                             builder.control(ControlCode::Red);
+                        } else if mapped_item != original_item_id {
+                            builder.control(ControlCode::Purple);
                         }
                         builder.text(game::item_name(mapped_item));
 
