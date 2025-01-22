@@ -3,17 +3,17 @@
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::Write;
-use std::panic;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use simplelog::{Config, LevelFilter, WriteLogger};
+use simplelog::LevelFilter;
 use windows::Win32::Foundation::{BOOL, HMODULE};
 use windows::Win32::System::Memory::{
     PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
 };
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
+mod error;
 mod game;
 mod patch;
 mod input;
@@ -587,27 +587,6 @@ unsafe extern "C" fn adjust_flashlight_vector() {
     vec[2] = -x;
 }
 
-fn open_log(level: LevelFilter) -> Result<()> {
-    let log_file = File::create("knife.log")?;
-    WriteLogger::init(level, Config::default(), log_file)?;
-    panic::set_hook(Box::new(|info| {
-        let msg = if let Some(msg) = info.payload().downcast_ref::<&str>() {
-            *msg
-        } else if let Some(msg) = info.payload().downcast_ref::<String>() {
-            msg.as_str()
-        } else {
-            "unknown"
-        };
-        let (file, line) = info
-            .location()
-            .map_or(("unknown", 0), |l| (l.file(), l.line()));
-        log::error!("Panic in {} on line {}: {}", file, line, msg);
-        log::logger().flush();
-    }));
-
-    Ok(())
-}
-
 fn main(reason: u32) -> Result<()> {
     if reason != DLL_PROCESS_ATTACH {
         return Ok(());
@@ -620,7 +599,10 @@ fn main(reason: u32) -> Result<()> {
         Err(_) => LevelFilter::Info,
     };
 
-    open_log(log_level)?;
+    // we don't really want the mod to not work just because we can't open the log file, so we'll
+    // swallow any errors here. unfortunately, without the log file, we don't have anywhere to
+    // report what went wrong.
+    let _ = error::open_log(log_level, "knife.log");
 
     // wait until the log is open to propagate a config error
     let config = config_read_result?;
