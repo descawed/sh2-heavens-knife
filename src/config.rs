@@ -237,7 +237,7 @@ impl Config {
         if let Some(mapping) = table.get("weapon_ammo_mapping").and_then(Value::as_array) {
             for (map_item_id, input_item_id) in weapon_ammo_mapping.iter_mut().zip(mapping.iter()) {
                 let input_item_id = input_item_id.as_integer().ok_or_else(|| anyhow!("Weapon/ammo mapping item is not an integer"))? as i8;
-                if input_item_id < game::ITEM_ID_MIN_WEAPON || input_item_id > game::ITEM_ID_MAX_WEAPON {
+                if (input_item_id < game::ITEM_ID_MIN_WEAPON && input_item_id != game::ITEM_ID_NOTHING) || input_item_id > game::ITEM_ID_MAX_WEAPON {
                     bail!("Weapon/ammo mapping item must be weapon or ammo, found {}", input_item_id);
                 }
                 *map_item_id = input_item_id;
@@ -772,13 +772,13 @@ impl UserInterface {
                         if selected_mapping <= game::ITEM_ID_NONE {
                             selected_mapping = game::ITEM_ID_MAX_WEAPON;
                         } else if selected_mapping < game::ITEM_ID_MIN_WEAPON {
-                            selected_mapping = game::ITEM_ID_NONE;
+                            selected_mapping = game::ITEM_ID_NOTHING;
                         }
                         mapping[index] = selected_mapping;
                     } else if self.keyboard.is_any_key_down_once(&[VK_RIGHT, VK_D]) {
                         selected_mapping += 1;
                         if selected_mapping > game::ITEM_ID_MAX_WEAPON {
-                            selected_mapping = game::ITEM_ID_NONE;
+                            selected_mapping = game::ITEM_ID_NOTHING;
                         } else if selected_mapping < game::ITEM_ID_MIN_WEAPON {
                             selected_mapping = game::ITEM_ID_HANDGUN;
                         }
