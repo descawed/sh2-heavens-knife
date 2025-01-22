@@ -108,6 +108,10 @@ At the top of the screen, you can see the equipped weapon. You can press E to se
 equipped weapon. Pressing E on the weapon that's already equipped, or on an item that's not equippable, will clear the
 equipped weapon.
 
+**Note**: Adding items to your inventory via the in-game inventory editor does not update the number of items you've
+picked up or set flags related to NG+ items, which may affect your end-game ranking and possibly other things I'm not
+aware of.
+
 ### Mappings
 
 The item mappings menu allows you to replace weapon and ammo pickups with pickups of different weapons and ammo. Here's
