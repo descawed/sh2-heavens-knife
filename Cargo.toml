@@ -1,6 +1,6 @@
 [package]
 name = "knife"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["descawed <github@descawed.com>"]
 edition = "2021"
 description = "A mod for Silent Hill 2: Enhanced Edition that allows James and Maria to use each other's items"

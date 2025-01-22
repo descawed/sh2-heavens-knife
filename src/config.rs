@@ -713,9 +713,9 @@ impl UserInterface {
                     } else if self.keyboard.is_any_key_down_once(&[VK_LEFT, VK_A]) {
                         if game::item_has_count(selected_item) {
                             let count = inventory.get_count(selected_item);
-                            if count >= 1 {
+                            if count > 1 || (count == 1 && !game::item_count_must_be_nonzero(selected_item)) {
                                 inventory.set_count(selected_item, count - 1);
-                            } else if !game::item_count_must_be_nonzero(selected_item) && inventory.has_item(selected_item) {
+                            } else if inventory.has_item(selected_item) {
                                 inventory.remove_item(selected_item);
                             } else {
                                 inventory.set_count(selected_item, game::get_item_max_count(selected_item));
