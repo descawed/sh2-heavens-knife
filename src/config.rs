@@ -995,6 +995,9 @@ impl UserInterface {
 
                         builder.text(option.name());
                         builder.text(": ");
+                        if mapped_item == game::ITEM_ID_NOTHING {
+                            builder.control(ControlCode::Red);
+                        }
                         builder.text(game::item_name(mapped_item));
 
                         builder.control(ControlCode::White);
