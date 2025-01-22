@@ -7,7 +7,8 @@ A mod for Silent Hill 2: Enhanced Edition that allows James and Maria to use eac
 This mod requires [Silent Hill 2: Enhanced Edition](https://enhanced.townofsilenthill.com/SH2/). You should have the
 game and Enhanced Edition already installed before you proceed.
 
-1. Grab a release from the Nexus or the Releases section on the right.
+1. Grab a release from the Nexus or the [Releases](https://github.com/descawed/sh2-heavens-knife/releases) section on
+   the right.
 2. Extract the contents of the zip file to your Silent Hill 2 folder. Make sure you extract *directly* into the Silent
    Hill 2 folder and not into a new folder inside that folder. If you did it correctly, you should have a file called
    knife.asi in the same folder as sh2pc.exe.
