@@ -192,6 +192,11 @@ For the animations, all of the weapon animations had to be converted to fit the 
 [this tool](https://github.com/descawed/sh2-anim-converter) to do that conversion - see that repo for the details of
 how that process works.
 
+Lastly, there's one special animation, sh2e/chr/wp/jms_weapon.anm. This "animation" defines the position where each
+equippable weapon should appear in James' hand when equipped. Maria has an analagous animation, which is identical to
+James' except that it has two extra entries corresponding to the revolver and cleaver. Our sh2e/chr/wp/jms_weapon.anm is
+just a copy of Maria's animation (from data/chr2/wp/mar_weapon.anm) so that James gets these entries as well.
+
 ## Credits
 
 Thanks to the following people for the tools I used to make this mod:
