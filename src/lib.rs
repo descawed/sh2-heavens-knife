@@ -965,15 +965,6 @@ fn main(reason: u32) -> Result<()> {
         ) as *mut game::WeaponInfo;
         patch::assert_byte(weapon_data_address, 0)?;
 
-        let james_weapon_end = weapon_data_address.offset(9);
-        patch::assert_byte(james_weapon_end, 0xFF)?;
-
-        let maria_weapon_cleaver = weapon_data_address.offset(12);
-        patch::assert_byte(maria_weapon_cleaver, 17)?;
-
-        let maria_weapon_end = weapon_data_address.offset(13);
-        patch::assert_byte(maria_weapon_end, 0xFF)?;
-
         // messages
         patch::assert_byte(draw_message_func, 0x8B)?; // mov
 
@@ -1090,15 +1081,6 @@ fn main(reason: u32) -> Result<()> {
             &(game::NUM_ITEMS as u8).to_le_bytes(),
         )?;
 
-        // merge James and Maria's weapon lists into a single contiguous list
-        log::info!("Merging weapon lists");
-
-        james_weapon_end.copy_from_nonoverlapping(maria_weapon_cleaver, 1); // replace James' end marker with the cleaver
-        maria_weapon_cleaver.copy_from_nonoverlapping(maria_weapon_end, 1); // replace the cleaver with the end marker
-
-        // we now have every weapon in one big list, but we'll still start Maria at the old start of her list
-        // so she gets the proper animation for no weapon
-
         // now we patch the logic
         log::info!(
             "Patching weapon selection logic at addresses {:#08X}, {:#08X}, {:#08X}, {:#08X}, {:#08X}",
@@ -1122,15 +1104,12 @@ fn main(reason: u32) -> Result<()> {
         // when equipping a weapon, point the weapon to the animation files for the appropriate character
         let zero_memory_address = patch::get_call_target(load_weapon_address);
         patch::set_trampoline(&mut GLOBAL.load_weapon_thunk, 1, override_animation_paths as usize)?;
-        let load_weapon_call = patch::call(load_weapon_address as usize, &raw const GLOBAL.load_weapon_thunk as usize);
         patch::set_trampoline(&mut GLOBAL.load_weapon_thunk, 7, zero_memory_address as usize)?;
+
+        let load_weapon_call = patch::call(load_weapon_address as usize, &raw const GLOBAL.load_weapon_thunk as usize);
         patch::patch(load_weapon_address, &load_weapon_call)?;
 
-        // when equipping a weapon, point the weapon to the animation files for the appropriate character
-        let zero_memory_address2 = patch::get_call_target(load_weapon_address2);
-        patch::set_trampoline(&mut GLOBAL.load_weapon_thunk2, 1, override_animation_paths as usize)?;
         let load_weapon_call2 = patch::call(load_weapon_address2 as usize, &raw const GLOBAL.load_weapon_thunk as usize);
-        patch::set_trampoline(&mut GLOBAL.load_weapon_thunk2, 7, zero_memory_address2 as usize)?;
         patch::patch(load_weapon_address2, &load_weapon_call2)?;
 
         // make sure James allocates enough memory to hold the Colt model

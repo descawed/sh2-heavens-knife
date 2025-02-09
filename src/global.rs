@@ -4,23 +4,8 @@ use anyhow::{Context, Result};
 
 use crate::game;
 
-#[derive(Debug)]
-struct WeaponAnimationFiles {
-    handgun: game::FileInfo,
-    shotgun: game::FileInfo,
-    rifle: game::FileInfo,
-    hyper_spray: game::FileInfo,
-    wooden_plank: game::FileInfo,
-    steel_pipe: game::FileInfo,
-    chainsaw: game::FileInfo,
-    great_knife: game::FileInfo,
-    revolver: game::FileInfo,
-    cleaver: game::FileInfo,
-}
-
 pub struct PersistentData {
     pub load_weapon_thunk: [u8; 12],
-    pub load_weapon_thunk2: [u8; 12],
     pub james_action_sound_thunk: [u8; 68],
     pub maria_action_sound_thunk: [u8; 63],
     pub rotate_bone_transform_thunk: [u8; 37],
@@ -36,8 +21,8 @@ pub struct PersistentData {
     set_new_game_plus_item_flag: Option<unsafe extern "C" fn(flag: u32)>,
     unk_grunt_sound_value: Option<unsafe extern "C" fn() -> i32>,
     is_flashlight_on: Option<unsafe extern "C" fn() -> bool>,
-    james_weapon_animations: WeaponAnimationFiles,
-    maria_weapon_animations: WeaponAnimationFiles,
+    default_animation_files: [*mut game::FileInfo; 10],
+    alternate_animation_files: [game::FileInfo; 10],
     weapon_info: *mut game::WeaponInfo,
     sound_param_data: *mut u8,
     inventory: *mut game::Inventory,
@@ -53,12 +38,6 @@ impl PersistentData {
 
         Self {
             load_weapon_thunk: [
-                0x60, // pushad
-                0xE8, 0, 0, 0, 0, // call <target>
-                0x61, // popad
-                0xE9, 0, 0, 0, 0, // jmp <return>
-            ],
-            load_weapon_thunk2: [
                 0x60, // pushad
                 0xE8, 0, 0, 0, 0, // call <target>
                 0x61, // popad
@@ -199,30 +178,20 @@ impl PersistentData {
             set_new_game_plus_item_flag: None,
             unk_grunt_sound_value: None,
             is_flashlight_on: None,
-            james_weapon_animations: WeaponAnimationFiles {
-                handgun: FileInfo::new(c"data/chr/jms/jms_wphand.anm"),
-                shotgun: FileInfo::new(c"data/chr/jms/jms_wpshot.anm"),
-                rifle: FileInfo::new(c"data/chr/jms/jms_wprifl.anm"),
-                hyper_spray: FileInfo::new(c"data/chr/jms/jms_wpsp.anm"),
-                wooden_plank: FileInfo::new(c"data/chr/jms/jms_wpkaku.anm"),
-                steel_pipe: FileInfo::new(c"data/chr/jms/jms_wppipe.anm"),
-                chainsaw: FileInfo::new(c"data/chr/jms/jms_wpcsaw.anm"),
-                great_knife: FileInfo::new(c"data/chr/jms/jms_wpnata.anm"),
-                revolver: FileInfo::new(c"data/chr/jms/jms_wpcolt.anm"),
-                cleaver: FileInfo::new(c"data/chr/jms/jms_wpknif.anm"),
-            },
-            maria_weapon_animations: WeaponAnimationFiles {
-                handgun: FileInfo::new(c"data/chr2/mar/xmar_wphand.anm"),
-                shotgun: FileInfo::new(c"data/chr2/mar/xmar_wpshot.anm"),
-                rifle: FileInfo::new(c"data/chr2/mar/xmar_wprifl.anm"),
-                hyper_spray: FileInfo::new(c"data/chr2/mar/xmar_wpsp.anm"),
-                wooden_plank: FileInfo::new(c"data/chr2/mar/xmar_wpkaku.anm"),
-                steel_pipe: FileInfo::new(c"data/chr2/mar/xmar_wppipe.anm"),
-                chainsaw: FileInfo::new(c"data/chr2/mar/xmar_wpcsaw.anm"),
-                great_knife: FileInfo::new(c"data/chr2/mar/xmar_wpnata.anm"),
-                revolver: FileInfo::new(c"data/chr2/mar/xmar_wpcolt.anm"),
-                cleaver: FileInfo::new(c"data/chr2/mar/xmar_wpknif.anm"),
-            },
+            default_animation_files: [std::ptr::null_mut(); 10],
+            alternate_animation_files: [
+                FileInfo::new(c"data/chr2/mar/xmar_wphand.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wpshot.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wprifl.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wpsp.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wpkaku.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wppipe.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wpcsaw.anm"),
+                FileInfo::new(c"data/chr2/mar/xmar_wpnata.anm"),
+                // we order the cleaver before the revolver when we unify the weapon lists
+                FileInfo::new(c"data/chr/jms/jms_wpknif.anm"),
+                FileInfo::new(c"data/chr/jms/jms_wpcolt.anm"),
+            ],
             weapon_info: std::ptr::null_mut(),
             sound_param_data: std::ptr::null_mut(),
             inventory: std::ptr::null_mut(),
@@ -250,7 +219,38 @@ impl PersistentData {
         self.main_menu_state = main_menu_state;
         self.flashlight_vector = flashlight_vector;
 
+        unsafe {
+            self.init_weapon_animations();
+        }
         self.load_item_messages()
+    }
+
+    unsafe fn init_weapon_animations(&mut self) {
+        let james_weapon_end = self.weapon_info.offset(9);
+        let maria_weapon_cleaver = self.weapon_info.offset(12);
+        let maria_weapon_end = self.weapon_info.offset(13);
+
+        james_weapon_end.copy_from_nonoverlapping(maria_weapon_cleaver, 1); // replace James' end marker with the cleaver
+        maria_weapon_cleaver.copy_from_nonoverlapping(maria_weapon_end, 1); // replace the cleaver with the end marker
+
+        // we now have every weapon in one big list, but we'll still start Maria at the old start of her list
+        // so she gets the proper animation for no weapon
+
+        // now record the default animation files
+        let weapon_info = self.weapon_info();
+        self.default_animation_files = [
+            weapon_info[1].animation,
+            weapon_info[2].animation,
+            weapon_info[3].animation,
+            weapon_info[4].animation,
+            weapon_info[5].animation,
+            weapon_info[6].animation,
+            weapon_info[7].animation,
+            weapon_info[8].animation,
+            weapon_info[9].animation,
+            // skip over Maria's no-weapon animation
+            weapon_info[11].animation,
+        ];
     }
 
     fn load_message_file(name: &str, language: char) -> Result<game::MessageFile> {
@@ -260,7 +260,7 @@ impl PersistentData {
             string = format!("data/etc/message/{name}_msg_{language}.mes");
             path = Path::new(&string);
         }
-        game::MessageFile::from_file(path).context(format!("Failed to load message file {}", string))
+        game::MessageFile::from_file(path).context(format!("Failed to load message file {string}"))
     }
 
     fn load_messages<const N: usize>(name: &str, language: char, message_ids: [usize; N]) -> Result<[Vec<u8>; N]> {
@@ -403,26 +403,24 @@ impl PersistentData {
     pub fn set_weapon_animations(&mut self) {
         let weapon_info = unsafe { self.weapon_info() };
         let is_player_maria = unsafe { self.is_player_maria() };
-        let animations = if is_player_maria {
-            &mut self.maria_weapon_animations
-        } else {
-            &mut self.james_weapon_animations
-        };
 
-        // skip James' no-weapon animation
-        weapon_info[1].animation = &raw mut animations.handgun;
-        weapon_info[2].animation = &raw mut animations.shotgun;
-        weapon_info[3].animation = &raw mut animations.rifle;
-        weapon_info[4].animation = &raw mut animations.hyper_spray;
-        weapon_info[5].animation = &raw mut animations.wooden_plank;
-        weapon_info[6].animation = &raw mut animations.steel_pipe;
-        weapon_info[7].animation = &raw mut animations.chainsaw;
-        weapon_info[8].animation = &raw mut animations.great_knife;
-        // normally index 9 is the end of James' weapons, but we copied the cleaver here to unify
-        // the weapon lists
-        weapon_info[9].animation = &raw mut animations.cleaver;
-        // skip Maria's no-weapon animation
-        weapon_info[11].animation = &raw mut animations.revolver;
+        if is_player_maria {
+            // for Maria, we need to use our alternate animation files for all of James' weapons,
+            // but we'll use the default animations for her own two weapons
+            for i in 0..8 {
+                weapon_info[i + 1].animation = &raw mut self.alternate_animation_files[i];
+            }
+            weapon_info[9].animation = self.default_animation_files[8];
+            weapon_info[11].animation = self.default_animation_files[9];
+        } else {
+            // for James, we use the default animations for all of his weapons, but our alternate
+            // animations for Maria's two weapons at the end
+            for i in 0..8 {
+                weapon_info[i + 1].animation = self.default_animation_files[i];
+            }
+            weapon_info[9].animation = &raw mut self.alternate_animation_files[8];
+            weapon_info[11].animation = &raw mut self.alternate_animation_files[9];
+        }
     }
 
     pub unsafe fn get_maria_weapon_offset(&self) -> isize {
